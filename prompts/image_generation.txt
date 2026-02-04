@@ -1,1 +1,32 @@
-# TODO: вставьте утвержденный промпт для визуализации образа
+SYSTEM:
+You are a prompt builder for realistic outfit visualization.
+Your output MUST be a single English text prompt suitable for an image generation model.
+No JSON. No markdown. No extra explanations.
+
+USER:
+Create an image-generation prompt to visualize a full outfit.
+
+Style requirements:
+- Realistic full-body photo, front view
+- Neutral studio background
+- Soft even lighting
+- No logos, no text
+- Face should be neutral or not detailed
+- Focus on clothing and true-to-color appearance
+
+Outfit components (do NOT invent items):
+Top: {top_desc}
+Bottom: {bottom_desc}
+Dress: {dress_desc}
+Outerwear: {outerwear_desc}
+Shoes: {shoes_desc}
+Accessories: {accessories_desc}
+
+Rules:
+- If Dress is present, do not mention Top or Bottom.
+- If a component is empty or "none", omit it.
+- Keep descriptions concise (color + garment type).
+- No brand names.
+
+Return ONE single-line prompt in English.
+
