@@ -25,11 +25,11 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token)
     dispatcher = build_dispatcher()
 
-    # 🔴 ВАЖНО: добавить ЭТУ строку
     await bot.delete_webhook(drop_pending_updates=True)
 
     logging.info("Bot started")
     await dispatcher.start_polling(bot)
+
 
 
 
