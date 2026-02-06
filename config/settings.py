@@ -1,0 +1,22 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    bot_token: str
+    db_url: str
+    payment_provider_token: str | None = None
+    ai_api_key: str | None = None
+    image_api_key: str | None = None
+    image_api_base: str = "https://api.openai.com/v1"
+    image_model: str = "gpt-image-1"
+    stt_api_key: str | None = None
+    max_items_per_user: int = 60
+    rate_limit_upload_per_min: int = 10
+    log_level: str = "INFO"
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+
+
+settings = Settings()
