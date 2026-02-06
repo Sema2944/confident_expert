@@ -31,7 +31,7 @@ async def request_outfit(message: Message, state: FSMContext) -> None:
     await message.answer("Выберите повод:", reply_markup=occasion_keyboard())
 
 
-@router.message(F.text == "Образы")
+@router.message(F.text.in_({"Образы", "✨ Образы", "👗 Собрать образы"}))
 async def request_outfit_short(message: Message, state: FSMContext) -> None:
     await request_outfit(message, state)
 
