@@ -9,27 +9,36 @@ from bot.states import BotStates
 router = Router()
 
 CATEGORIES = {
-    "top": "Верх",
-    "bottom": "Низ",
-    "outerwear": "Верхняя одежда",
-    "shoes": "Обувь",
-    "accessory": "Аксессуар",
-    "dress": "Платье",
+    "top": "👕 Верх",
+    "bottom": "👖 Низ",
+    "outerwear": "🧥 Верхняя одежда",
+    "shoes": "👟 Обувь",
+    "accessory": "🧢 Аксессуары",
+    "onepiece": "👔 Цельный образ",
 }
 
 CATEGORY_ALIASES = {
     "верх": "top",
+    "👕 верх": "top",
     "низ": "bottom",
+    "👖 низ": "bottom",
     "верхняя одежда": "outerwear",
+    "🧥 верхняя одежда": "outerwear",
     "обувь": "shoes",
+    "👟 обувь": "shoes",
     "аксессуар": "accessory",
-    "платье": "dress",
+    "аксессуары": "accessory",
+    "🧢 аксессуары": "accessory",
+    "платье": "onepiece",
+    "цельный образ": "onepiece",
+    "👔 цельный образ": "onepiece",
     "top": "top",
     "bottom": "bottom",
     "outerwear": "outerwear",
     "shoes": "shoes",
     "accessory": "accessory",
-    "dress": "dress",
+    "dress": "onepiece",
+    "onepiece": "onepiece",
 }
 
 
@@ -44,7 +53,7 @@ async def upload_start(message: Message, state: FSMContext) -> None:
     await message.answer("Выберите категорию:", reply_markup=category_keyboard())
 
 
-@router.message(F.text == "Загрузить")
+@router.message(F.text.in_({"📥 Загрузить", "Загрузить"}))
 async def upload_start_short(message: Message, state: FSMContext) -> None:
     await upload_start(message, state)
 
@@ -94,7 +103,7 @@ async def upload_photo_prompt(message: Message) -> None:
     await message.answer("Нужно отправить фото.")
 
 
-@router.message(F.text.in_({"🧺 Мой гардероб", "Гардероб"}))
+@router.message(F.text.in_({"🧺 Мой гардероб", "🧺 Гардероб"}))
 async def wardrobe_list(message: Message) -> None:
     counts = get_category_counts(message.from_user.id)
     if not counts:
@@ -105,3 +114,4 @@ async def wardrobe_list(message: Message) -> None:
     for category, count in sorted(counts.items()):
         lines.append(f"- {category}: {count}")
     await message.answer("\n".join(lines))
+
