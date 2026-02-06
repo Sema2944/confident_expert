@@ -19,3 +19,4 @@ def get_category_counts(user_id: int) -> dict[str, int]:
     for item in _WARDROBE_ITEMS.get(user_id, []):
         counts[item["category"]] += 1
     return dict(counts)
+
