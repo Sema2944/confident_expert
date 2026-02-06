@@ -5,12 +5,12 @@ def menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="Загрузить"),
-                KeyboardButton(text="Образы"),
+                KeyboardButton(text="📥 Загрузить"),
+                KeyboardButton(text="✨ Образы"),
             ],
             [
-                KeyboardButton(text="Гардероб"),
-                KeyboardButton(text="Подписка"),
+                KeyboardButton(text="🧺 Гардероб"),
+                KeyboardButton(text="💳 Подписка"),
             ],
         ],
         resize_keyboard=True,
@@ -44,9 +44,9 @@ def season_keyboard() -> ReplyKeyboardMarkup:
 def category_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Верх"), KeyboardButton(text="Низ")],
-            [KeyboardButton(text="Верхняя одежда"), KeyboardButton(text="Обувь")],
-            [KeyboardButton(text="Аксессуар"), KeyboardButton(text="Платье")],
+            [KeyboardButton(text="👕 Верх"), KeyboardButton(text="👖 Низ")],
+            [KeyboardButton(text="🧥 Верхняя одежда"), KeyboardButton(text="👟 Обувь")],
+            [KeyboardButton(text="🧢 Аксессуары"), KeyboardButton(text="👔 Цельный образ")],
             [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True,
