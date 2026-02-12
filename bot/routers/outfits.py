@@ -81,12 +81,18 @@ async def set_season(message: Message, state: FSMContext) -> None:
         count=3,
     )
 
+    images_sent = 0
     for index, outfit in enumerate(outfits, start=1):
         await message.answer(f"Образ {index}: {outfit.description}")
         generated = await image_service.generate_image(outfit.description)
         if generated:
             await message.answer_photo(generated)
+            images_sent += 1
+
+    if images_sent == 0:
+        await message.answer(
+            "⚠️ Картинки не сгенерировались. Проверьте IMAGE_API_KEY/IMAGE_API_BASE/IMAGE_MODEL в Render Environment."
+        )
 
     await state.set_state(BotStates.menu)
     await message.answer("Готово. Что делаем дальше?", reply_markup=menu_keyboard())
-
