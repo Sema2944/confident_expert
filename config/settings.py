@@ -1,9 +1,10 @@
 diff --git a/config/settings.py b/config/settings.py
-index fff2a71dd2f696e145df895898e3e9bd488922b1..1f80e3545f016cae3b3ab67130f1abcb3e3b39a8 100644
+index fff2a71dd2f696e145df895898e3e9bd488922b1..07f27dde787a553bf76293dac45c9a22cf3c90fe 100644
 --- a/config/settings.py
 +++ b/config/settings.py
-@@ -1,20 +1,22 @@
- from pydantic_settings import BaseSettings
+@@ -1,20 +1,23 @@
+-from pydantic_settings import BaseSettings
++from pydantic_settings import BaseSettings, SettingsConfigDict
  
  
  class Settings(BaseSettings):
@@ -19,9 +20,13 @@ index fff2a71dd2f696e145df895898e3e9bd488922b1..1f80e3545f016cae3b3ab67130f1abcb
      rate_limit_upload_per_min: int = 10
      log_level: str = "INFO"
  
-     class Config:
-         env_file = ".env"
-         case_sensitive = False
+-    class Config:
+-        env_file = ".env"
+-        case_sensitive = False
++    model_config = SettingsConfigDict(
++        env_file=".env",
++        case_sensitive=False,
++    )
  
  
  settings = Settings()
