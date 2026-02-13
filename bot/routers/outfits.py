@@ -81,10 +81,18 @@ async def set_season(message: Message, state: FSMContext) -> None:
         count=3,
     )
 
+    if not outfits:
+        await message.answer(
+            "Не удалось собрать образы: добавьте обувь и базовые категории (верх/низ или цельный образ).",
+            reply_markup=menu_keyboard(),
+        )
+        await state.set_state(BotStates.menu)
+        return
+
     images_sent = 0
     for index, outfit in enumerate(outfits, start=1):
         await message.answer(f"Образ {index}: {outfit.description}")
-        generated = await image_service.generate_image(outfit.description)
+        generated = await image_service.generate_image(outfit.image_prompt)
         if generated:
             await message.answer_photo(generated)
             images_sent += 1
