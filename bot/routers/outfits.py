@@ -23,6 +23,13 @@ SEASONS = {
     "☀️ Лето": "summer",
 }
 
+OCCASION_TITLES = {
+    "work_office": "Рабочий образ",
+    "going_out": "Образ для выхода",
+    "sport_travel": "Образ для прогулки",
+    "casual": "Образ",
+}
+
 
 def _collect_outfit_file_ids(items_payload: dict[str, list[str]]) -> list[str]:
     category_order = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
@@ -81,9 +88,12 @@ async def set_season(message: Message, state: FSMContext) -> None:
         await state.set_state(BotStates.menu)
         return
 
+    state_data = await state.get_data()
+    occasion_code = state_data.get("occasion", "casual")
+
     outfits = await outfit_service.generate_outfits(
         items=items,
-        occasion=(await state.get_data()).get("occasion", "casual"),
+        occasion=occasion_code,
         season=season,
         count=1,
     )
@@ -96,8 +106,10 @@ async def set_season(message: Message, state: FSMContext) -> None:
         await state.set_state(BotStates.menu)
         return
 
-    for index, outfit in enumerate(outfits, start=1):
-        await message.answer(f"Образ {index}: {outfit.description}")
+    title = OCCASION_TITLES.get(occasion_code, "Образ")
+
+    for outfit in outfits:
+        await message.answer(title)
 
         outfit_image = await outfit_image_service.render_outfit_image(
             bot=message.bot,
@@ -105,8 +117,7 @@ async def set_season(message: Message, state: FSMContext) -> None:
         )
         if outfit_image:
             await message.answer_photo(
-                photo=BufferedInputFile(outfit_image, filename=f"outfit_{index}.png"),
-                caption="Единая картинка образа только из ваших загруженных вещей.",
+                photo=BufferedInputFile(outfit_image, filename="outfit.png"),
             )
             continue
 
@@ -120,7 +131,4 @@ async def set_season(message: Message, state: FSMContext) -> None:
             await message.answer_photo(photo=file_id)
 
     await state.set_state(BotStates.menu)
-    await message.answer(
-        "Готово. Собрал образы в одну картинку строго из ваших вещей (без добавления новых).",
-        reply_markup=menu_keyboard(),
-    )
+    await message.answer("Готово.", reply_markup=menu_keyboard())
