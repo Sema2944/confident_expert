@@ -5,12 +5,12 @@ from aiogram.types import BufferedInputFile, Message
 from bot.keyboards import menu_keyboard, occasion_keyboard, season_keyboard
 from bot.storage import get_items
 from bot.states import BotStates
-from services.image_service import ImageService
+from services.outfit_image_service import OutfitImageService
 from services.outfit_service import OutfitService
 
 router = Router()
 outfit_service = OutfitService()
-image_service = ImageService()
+outfit_image_service = OutfitImageService()
 
 OCCASIONS = {
     "🏢 Работа/офис": "work_office",
@@ -97,17 +97,18 @@ async def set_season(message: Message, state: FSMContext) -> None:
         await state.set_state(BotStates.menu)
         return
 
-    ai_generated_count = 0
     for index, outfit in enumerate(outfits, start=1):
         await message.answer(f"Образ {index}: {outfit.description}")
 
-        generated_image = await image_service.generate_image(outfit.image_prompt)
-        if generated_image:
+        outfit_image = await outfit_image_service.render_outfit_image(
+            bot=message.bot,
+            items_payload=outfit.items,
+        )
+        if outfit_image:
             await message.answer_photo(
-                photo=BufferedInputFile(generated_image, filename=f"outfit_{index}.png"),
-                caption="AI собрал вещи в единый обработанный образ на одной картинке.",
+                photo=BufferedInputFile(outfit_image, filename=f"outfit_{index}.png"),
+                caption="Единая картинка образа только из ваших загруженных вещей.",
             )
-            ai_generated_count += 1
             continue
 
         outfit_file_ids = _collect_outfit_file_ids(outfit.items)
@@ -115,21 +116,12 @@ async def set_season(message: Message, state: FSMContext) -> None:
             await message.answer("Не получилось показать этот образ. Попробуйте еще раз чуть позже.")
             continue
 
-        await message.answer(
-            "Не удалось сгенерировать единый образ, поэтому показываю подобранные вещи по очереди:",
-        )
+        await message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
         for file_id in outfit_file_ids:
             await message.answer_photo(photo=file_id)
 
     await state.set_state(BotStates.menu)
-    if ai_generated_count:
-        await message.answer(
-            "Готово. Показал образы одной картинкой, а где генерация недоступна — показал вещи отдельно.",
-            reply_markup=menu_keyboard(),
-        )
-        return
-
     await message.answer(
-        "Готово. Сейчас генерация недоступна, поэтому показал вещи каждого образа отдельно.",
+        "Готово. Собрал образы в одну картинку строго из ваших вещей (без добавления новых).",
         reply_markup=menu_keyboard(),
     )
