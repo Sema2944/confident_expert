@@ -1,19 +1,14 @@
-import logging
-
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import Message
 
 from bot.keyboards import menu_keyboard, occasion_keyboard, season_keyboard
 from bot.storage import get_items
 from bot.states import BotStates
-from services.image_service import ImageService
 from services.outfit_service import OutfitService
 
 router = Router()
 outfit_service = OutfitService()
-image_service = ImageService()
 
 OCCASIONS = {
     "🏢 Работа/офис": "work_office",
@@ -26,6 +21,14 @@ SEASONS = {
     "🍂 Весна/осень": "demi",
     "☀️ Лето": "summer",
 }
+
+
+def _collect_outfit_file_ids(items_payload: dict[str, list[str]]) -> list[str]:
+    category_order = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
+    file_ids: list[str] = []
+    for category in category_order:
+        file_ids.extend(items_payload.get(category, []))
+    return file_ids
 
 
 @router.message(F.text == "👗 Собрать образы")
@@ -86,31 +89,22 @@ async def set_season(message: Message, state: FSMContext) -> None:
 
     if not outfits:
         await message.answer(
-            "Не удалось собрать образы: добавьте обувь и базовые категории (верх/низ или цельный образ).",
+            "Не удалос собрать образы: добавьте обувь и базовые категории (верх/низ или цельный образ).",
             reply_markup=menu_keyboard(),
         )
         await state.set_state(BotStates.menu)
         return
 
-    images_sent = 0
     for index, outfit in enumerate(outfits, start=1):
         await message.answer(f"Образ {index}: {outfit.description}")
-        generated = await image_service.generate_image(outfit.image_prompt)
-        if not generated:
+
+        outfit_file_ids = _collect_outfit_file_ids(outfit.items)
+        if not outfit_file_ids:
             continue
 
-        try:
-            await message.answer_photo(
-                photo=BufferedInputFile(generated, filename=f"outfit_{index}.png")
-            )
-            images_sent += 1
-        except TelegramBadRequest as error:
-            logging.exception("Failed to send generated image to Telegram: %s", error)
-
-    if images_sent == 0:
-        await message.answer(
-            "⚠️ Картинки не сгенерировались. Проверьте IMAGE_API_KEY/IMAGE_API_BASE/IMAGE_MODEL в Render Environment."
-        )
+        await message.answer("В этот образ попали только ваши вещи:")
+        for file_id in outfit_file_ids:
+            await message.answer_photo(photo=file_id)
 
     await state.set_state(BotStates.menu)
-    await message.answer("Готово. Что делаем дальше?", reply_markup=menu_keyboard())
+    await message.answer("Готово. Показал только вещи из вашего гардероба.", reply_markup=menu_keyboard())
