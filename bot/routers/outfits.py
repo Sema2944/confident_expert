@@ -85,7 +85,7 @@ async def set_season(message: Message, state: FSMContext) -> None:
         items=items,
         occasion=(await state.get_data()).get("occasion", "casual"),
         season=season,
-        count=3,
+        count=1,
     )
 
     if not outfits:
