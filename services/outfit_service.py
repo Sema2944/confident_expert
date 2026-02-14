@@ -1,180 +1,22 @@
-from io import BytesIO
-from dataclasses import dataclass
-from pathlib import Path
-
-
-@dataclass
-class OutfitResult:
-    description: str
-    items: dict
-    image_prompt: str
-
-
-class OutfitService:
-    _IMAGE_PROMPT_TEMPLATE = Path(__file__).resolve().parents[1] / "prompts" / "image_generation.txt"
-
-    @staticmethod
-    def _pick_with_offset(values: list[dict], offset: int) -> dict | None:
-        if not values:
-            return None
-        return values[offset % len(values)]
-
-    @staticmethod
-    def _item_descriptor(item: dict | None, fallback: str) -> str:
-        if not item:
-            return "none"
-
-        primary_color = (item.get("primary_color") or "").strip().lower()
-        item_type = (item.get("type") or "").strip().lower()
-
-        if primary_color in {"unknown", "none", "null", "-"}:
-            primary_color = ""
-        if item_type in {"unknown", "none", "null", "-"}:
-            item_type = ""
-
-        if primary_color and item_type:
-            return f"{primary_color} {item_type}"
-        if item_type:
-            return item_type
-        if primary_color:
-            return f"{primary_color} {fallback}"
-        return fallback
-
-    @classmethod
-    def _build_image_prompt(
-        cls,
-        top: dict | None,
-        bottom: dict | None,
-        dress: dict | None,
-        outerwear: dict | None,
-        shoes: dict | None,
-        accessory: dict | None,
-    ) -> str:
-        top_desc = cls._item_descriptor(top, "top")
-        bottom_desc = cls._item_descriptor(bottom, "bottom")
-        dress_desc = cls._item_descriptor(dress, "dress")
-        outerwear_desc = cls._item_descriptor(outerwear, "outerwear")
-        shoes_desc = cls._item_descriptor(shoes, "shoes")
-        accessories_desc = cls._item_descriptor(accessory, "accessory")
-
-        template = cls._IMAGE_PROMPT_TEMPLATE.read_text(encoding="utf-8")
-        prompt = template.format(
-            top_desc=top_desc,
-            bottom_desc=bottom_desc,
-            dress_desc=dress_desc,
-            outerwear_desc=outerwear_desc,
-            shoes_desc=shoes_desc,
-            accessories_desc=accessories_desc,
-        )
-
-        normalized_prompt = (
-            prompt.replace("SYSTEM:", "")
-            .replace("USER:", "")
-            .replace("\n", " ")
-            .strip()
-        )
-        return " ".join(normalized_prompt.split())
-
-    async def generate_outfits(
-        self,
-        items: list[dict],
-        occasion: str,
-        season: str,
-        count: int,
-    ) -> list[OutfitResult]:
-        grouped: dict[str, list[dict]] = {}
-        for item in items:
-            category = item.get("category")
-            if not category:
-                continue
-            grouped.setdefault(category, []).append(item)
-
-        tops = grouped.get("top", [])
-        bottoms = grouped.get("bottom", [])
-        dresses = grouped.get("onepiece", [])
-        outerwears = grouped.get("outerwear", [])
-        shoes = grouped.get("shoes", [])
-        accessories = grouped.get("accessory", [])
-
-        if not shoes:
-            return []
-
-        results: list[OutfitResult] = []
-        for index in range(count):
-            use_dress = bool(dresses and (not tops or not bottoms or index % 2 == 1))
-
-            top = None if use_dress else self._pick_with_offset(tops, index)
-            bottom = None if use_dress else self._pick_with_offset(bottoms, index)
-            dress = self._pick_with_offset(dresses, index) if use_dress else None
-
-            if use_dress and not dress:
-                continue
-            if not use_dress and (not top or not bottom):
-                continue
-
-            shoe = self._pick_with_offset(shoes, index)
-            outerwear = self._pick_with_offset(outerwears, index) if outerwears else None
-            accessory = self._pick_with_offset(accessories, index) if accessories else None
-
-            items_payload = {
-                "top": [top["telegram_file_id"]] if top else [],
-                "bottom": [bottom["telegram_file_id"]] if bottom else [],
-                "dress": [dress["telegram_file_id"]] if dress else [],
-                "outerwear": [outerwear["telegram_file_id"]] if outerwear else [],
-                "shoes": [shoe["telegram_file_id"]] if shoe else [],
-                "accessories": [accessory["telegram_file_id"]] if accessory else [],
-            }
-
-            description = (
-                f"Образ #{index + 1}: {occasion}, {season}. "
-                f"{'Платье + обувь' if use_dress else 'Верх + низ + обувь'}"
-                f"{' + верхняя одежда' if outerwear else ''}"
-                f"{' + аксессуары' if accessory else ''}."
-            )
-
-            image_prompt = self._build_image_prompt(
-                top=top,
-                bottom=bottom,
-                dress=dress,
-                outerwear=outerwear,
-                shoes=shoe,
-                accessory=accessory,
-            )
-
-            results.append(
-                OutfitResult(
-                    description=description,
-                    items=items_payload,
-                    image_prompt=image_prompt,
-                )
-            )
-
-        return results
-
-
 class OutfitImageService:
     _CATEGORY_ORDER = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
 
     async def render_outfit_image(self, bot, items_payload: dict[str, list[str]]) -> bytes | None:
         from PIL import Image
 
-        file_ids: list[str] = []
+        category_images: dict[str, Image.Image] = {}
         for category in self._CATEGORY_ORDER:
-            file_ids.extend(items_payload.get(category, []))
+            file_ids = items_payload.get(category, [])
+            for file_id in file_ids:
+                image = await self._download_image(bot=bot, file_id=file_id)
+                if image is not None:
+                    category_images[category] = image
+                    break
 
-        if not file_ids:
+        if not category_images:
             return None
 
-        images: list[Image.Image] = []
-        for file_id in file_ids:
-            image = await self._download_image(bot=bot, file_id=file_id)
-            if image is not None:
-                images.append(image)
-
-        if not images:
-            return None
-
-        composed = self._compose_vertical(images)
+        composed = self._compose_outfit(category_images)
         buffer = BytesIO()
         composed.save(buffer, format="PNG")
         return buffer.getvalue()
@@ -194,25 +36,46 @@ class OutfitImageService:
             return None
 
     @staticmethod
-    def _compose_vertical(images):
+    def _compose_outfit(category_images):
         from PIL import Image
 
-        target_width = 1536
+        canvas_width = 1536
+        canvas_height = 2304
+        canvas = Image.new("RGB", (canvas_width, canvas_height), color=(255, 255, 255))
 
-        resized_images: list[Image.Image] = []
-        for source in images:
-            scale = target_width / source.width
-            resized_height = max(1, int(source.height * scale))
-            resized_images.append(
-                source.resize((target_width, resized_height), Image.Resampling.LANCZOS)
-            )
+        slots = {
+            "outerwear": (318, 60, 900, 820),
+            "top": (318, 140, 900, 760),
+            "dress": (278, 120, 980, 1520),
+            "bottom": (338, 860, 860, 980),
+            "shoes": (378, 1860, 780, 360),
+            "accessories": (1090, 150, 320, 320),
+        }
 
-        total_height = sum(image.height for image in resized_images)
-        canvas = Image.new("RGB", (target_width, total_height), color=(255, 255, 255))
+        if category_images.get("dress") is not None:
+            OutfitImageService._paste_contained(canvas, category_images["dress"], slots["dress"])
+        else:
+            if category_images.get("outerwear") is not None:
+                OutfitImageService._paste_contained(canvas, category_images["outerwear"], slots["outerwear"])
+            if category_images.get("top") is not None:
+                OutfitImageService._paste_contained(canvas, category_images["top"], slots["top"])
+            if category_images.get("bottom") is not None:
+                OutfitImageService._paste_contained(canvas, category_images["bottom"], slots["bottom"])
 
-        y = 0
-        for image in resized_images:
-            canvas.paste(image, (0, y))
-            y += image.height
+        if category_images.get("shoes") is not None:
+            OutfitImageService._paste_contained(canvas, category_images["shoes"], slots["shoes"])
+
+        if category_images.get("accessories") is not None:
+            OutfitImageService._paste_contained(canvas, category_images["accessories"], slots["accessories"])
 
         return canvas
+
+    @staticmethod
+    def _paste_contained(canvas, source, box):
+        from PIL import Image, ImageOps
+
+        x, y, w, h = box
+        fitted = ImageOps.contain(source, (w, h), method=Image.Resampling.LANCZOS)
+        paste_x = x + (w - fitted.width) // 2
+        paste_y = y + (h - fitted.height) // 2
+        canvas.paste(fitted, (paste_x, paste_y))
