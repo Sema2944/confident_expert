@@ -1,6 +1,9 @@
+import logging
+
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from bot.keyboards import menu_keyboard, occasion_keyboard, season_keyboard
 from bot.storage import get_items
@@ -93,9 +96,16 @@ async def set_season(message: Message, state: FSMContext) -> None:
     for index, outfit in enumerate(outfits, start=1):
         await message.answer(f"Образ {index}: {outfit.description}")
         generated = await image_service.generate_image(outfit.image_prompt)
-        if generated:
-            await message.answer_photo(generated)
+        if not generated:
+            continue
+
+        try:
+            await message.answer_photo(
+                photo=BufferedInputFile(generated, filename=f"outfit_{index}.png")
+            )
             images_sent += 1
+        except TelegramBadRequest as error:
+            logging.exception("Failed to send generated image to Telegram: %s", error)
 
     if images_sent == 0:
         await message.answer(
