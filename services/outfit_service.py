@@ -23,8 +23,13 @@ class OutfitService:
         if not item:
             return "none"
 
-        primary_color = (item.get("primary_color") or "").strip()
-        item_type = (item.get("type") or "").strip()
+        primary_color = (item.get("primary_color") or "").strip().lower()
+        item_type = (item.get("type") or "").strip().lower()
+
+        if primary_color in {"unknown", "none", "null", "-"}:
+            primary_color = ""
+        if item_type in {"unknown", "none", "null", "-"}:
+            item_type = ""
 
         if primary_color and item_type:
             return f"{primary_color} {item_type}"
@@ -61,13 +66,13 @@ class OutfitService:
             accessories_desc=accessories_desc,
         )
 
-        return (
+        normalized_prompt = (
             prompt.replace("SYSTEM:", "")
             .replace("USER:", "")
-            .strip()
             .replace("\n", " ")
-            .replace("  ", " ")
+            .strip()
         )
+        return " ".join(normalized_prompt.split())
 
     async def generate_outfits(
         self,
