@@ -7,12 +7,14 @@ USER:
 Create an image-generation prompt to visualize a full outfit.
 
 Style requirements:
-- Realistic full-body photo, front view
+- Realistic full-body fashion photo, front view
+- One person, one cohesive look, single frame (not a collage)
 - Neutral studio background
-- Soft even lighting
+- Magazine-level retouching and polished photo processing
+- Soft even lighting with rich, natural color depth
 - No logos, no text
 - Face should be neutral or not detailed
-- Focus on clothing and true-to-color appearance
+- Focus on clothing, premium styling, and true-to-color appearance
 
 Outfit components (do NOT invent items):
 Top: {top_desc}
@@ -26,7 +28,7 @@ Rules:
 - If Dress is present, do not mention Top or Bottom.
 - If a component is empty or "none", omit it.
 - Keep descriptions concise (color + garment type).
+- The final outfit must look wearable, desirable, and stylistically coherent.
 - No brand names.
 
 Return ONE single-line prompt in English.
-
