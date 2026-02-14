@@ -197,32 +197,22 @@ class OutfitImageService:
     def _compose_vertical(images):
         from PIL import Image
 
-        target_width = 1400
-        spacing = 36
-        margin = 40
-        panel_padding = 20
-        inner_width = target_width - margin * 2 - panel_padding * 2
+        target_width = 1536
 
-        panels: list[Image.Image] = []
+        resized_images: list[Image.Image] = []
         for source in images:
-            scale = inner_width / source.width
+            scale = target_width / source.width
             resized_height = max(1, int(source.height * scale))
-            resized = source.resize((inner_width, resized_height), Image.Resampling.LANCZOS)
-
-            panel = Image.new(
-                "RGB",
-                (target_width - margin * 2, resized_height + panel_padding * 2),
-                color=(255, 255, 255),
+            resized_images.append(
+                source.resize((target_width, resized_height), Image.Resampling.LANCZOS)
             )
-            panel.paste(resized, (panel_padding, panel_padding))
-            panels.append(panel)
 
-        total_height = margin * 2 + sum(panel.height for panel in panels) + spacing * (len(panels) - 1)
-        canvas = Image.new("RGB", (target_width, total_height), color=(245, 245, 245))
+        total_height = sum(image.height for image in resized_images)
+        canvas = Image.new("RGB", (target_width, total_height), color=(255, 255, 255))
 
-        y = margin
-        for panel in panels:
-            canvas.paste(panel, (margin, y))
-            y += panel.height + spacing
+        y = 0
+        for image in resized_images:
+            canvas.paste(image, (0, y))
+            y += image.height
 
         return canvas
