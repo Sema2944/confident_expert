@@ -156,7 +156,7 @@ class OutfitImageService:
     _CATEGORY_ORDER = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
 
     async def render_outfit_image(self, bot, items_payload: dict[str, list[str]]) -> bytes | None:
-        from PIL import Image, ImageOps
+        from PIL import Image
 
         file_ids: list[str] = []
         for category in self._CATEGORY_ORDER:
@@ -176,7 +176,7 @@ class OutfitImageService:
 
         composed = self._compose_vertical(images)
         buffer = BytesIO()
-        composed.save(buffer, format="PNG", optimize=True)
+        composed.save(buffer, format="PNG")
         return buffer.getvalue()
 
     async def _download_image(self, bot, file_id: str):
@@ -195,20 +195,34 @@ class OutfitImageService:
 
     @staticmethod
     def _compose_vertical(images):
-        from PIL import Image, ImageOps
+        from PIL import Image
 
-        target_width = 1024
-        panel_height = 360
-        spacing = 24
-        margin = 24
+        target_width = 1400
+        spacing = 36
+        margin = 40
+        panel_padding = 20
+        inner_width = target_width - margin * 2 - panel_padding * 2
 
-        total_height = margin * 2 + len(images) * panel_height + (len(images) - 1) * spacing
+        panels: list[Image.Image] = []
+        for source in images:
+            scale = inner_width / source.width
+            resized_height = max(1, int(source.height * scale))
+            resized = source.resize((inner_width, resized_height), Image.Resampling.LANCZOS)
+
+            panel = Image.new(
+                "RGB",
+                (target_width - margin * 2, resized_height + panel_padding * 2),
+                color=(255, 255, 255),
+            )
+            panel.paste(resized, (panel_padding, panel_padding))
+            panels.append(panel)
+
+        total_height = margin * 2 + sum(panel.height for panel in panels) + spacing * (len(panels) - 1)
         canvas = Image.new("RGB", (target_width, total_height), color=(245, 245, 245))
 
         y = margin
-        for source in images:
-            fitted = ImageOps.fit(source, (target_width - margin * 2, panel_height), method=Image.Resampling.LANCZOS)
-            canvas.paste(fitted, (margin, y))
-            y += panel_height + spacing
+        for panel in panels:
+            canvas.paste(panel, (margin, y))
+            y += panel.height + spacing
 
         return canvas
