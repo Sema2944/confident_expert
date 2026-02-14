@@ -35,7 +35,12 @@ cp .env.example .env
 arduino
 Копировать код
 
-4. Configure image generation (otherwise the bot will answer without pictures)
+4. Configure item analysis (otherwise uploaded items will have unknown attributes)
+AI_API_KEY=<your_api_key>
+AI_API_BASE=https://api.openai.com/v1
+AI_MODEL=gpt-4.1-mini
+
+5. Configure image generation (otherwise the bot will answer without pictures)
 IMAGE_API_KEY=<your_api_key>
 IMAGE_API_BASE=https://api.openai.com/v1
 IMAGE_MODEL=gpt-image-1
