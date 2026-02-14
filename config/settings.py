@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     db_url: str
     payment_provider_token: str | None = None
     ai_api_key: str | None = None
+    ai_api_base: str = "https://api.openai.com/v1"
+    ai_model: str = "gpt-4.1-mini"
     image_api_key: str | None = None
     image_api_base: str = "https://api.openai.com/v1"
     image_model: str = "gpt-image-1"
