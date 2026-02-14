@@ -5,8 +5,7 @@ from aiogram.types import BufferedInputFile, Message
 from bot.keyboards import menu_keyboard, occasion_keyboard, season_keyboard
 from bot.storage import get_items
 from bot.states import BotStates
-from services.outfit_image_service import OutfitImageService
-from services.outfit_service import OutfitService
+from services.outfit_service import OutfitImageService, OutfitService
 
 router = Router()
 outfit_service = OutfitService()
