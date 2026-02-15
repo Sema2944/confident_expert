@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     image_api_base: str = "https://api.openai.com/v1"
     image_model: str = "gpt-image-1"
     stt_api_key: str | None = None
+    fashion_trend_feeds: str | None = None
     max_items_per_user: int = 60
     rate_limit_upload_per_min: int = 10
     log_level: str = "INFO"
