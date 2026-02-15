@@ -192,7 +192,7 @@ _GENDER_HINT_RU = {
 
 
 def build_russian_item_summary(category: str, analysis: ItemAnalysis) -> str:
-    category_ru = _CATEGORY_RU.get(category, category)
+    _ = category
     item_type = analysis.type if analysis.type and analysis.type != "unknown" else "тип не определён"
     primary_color = (
         analysis.primary_color
@@ -211,12 +211,11 @@ def build_russian_item_summary(category: str, analysis: ItemAnalysis) -> str:
 
     return (
         "Вещь добавлена в гардероб.\n"
-        f"Категория: {category_ru}.\n"
         f"Тип: {item_type}.\n"
-        f"Основной цвет: {primary_color}.\n"
-        f"Дополнительный цвет: {secondary_color}.\n"
+        f"Цвет: {primary_color}.\n"
+        f"Доп. цвет: {secondary_color}.\n"
         f"Узор: {pattern}.\n"
         f"Сезон: {season}.\n"
         f"Стиль: {formality}.\n"
-        f"Гендерная рекомендация: {gender_hint}."
+        f"Гендер: {gender_hint}."
     )
