@@ -1,4 +1,3 @@
-cat > services/photo_template_service.py <<'PY'
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -80,4 +79,3 @@ class PhotoTemplateService:
         paste_x = slot.x + (slot.width - fitted.width) // 2
         paste_y = slot.y + (slot.height - fitted.height) // 2
         canvas.paste(fitted, (paste_x, paste_y))
-PY
