@@ -5,16 +5,12 @@ def menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📥 Загрузить"),
-                KeyboardButton(text="✨ Образы"),
+                KeyboardButton(text="🔥 Сегодня"),
+                KeyboardButton(text="✨ Собрать образ"),
             ],
             [
-                KeyboardButton(text="🧺 Гардероб"),
-                KeyboardButton(text="💳 Подписка"),
-            ],
-            [
-                KeyboardButton(text="🎨 Модные тренды"),
-                KeyboardButton(text="📝 Обратная связь"),
+                KeyboardButton(text="📥 Добавить вещь"),
+                KeyboardButton(text="🧺 Мой гардероб"),
             ],
         ],
         resize_keyboard=True,
