@@ -1,4 +1,3 @@
-cat > services/outfit_service.py <<'PY'
 from io import BytesIO
 
 from services.outfit_generation_service import OutfitResult, OutfitService
@@ -67,4 +66,3 @@ class OutfitImageService:
             template_images["accessories"] = category_images["accessories"]
 
         return PhotoTemplateService.compose(template_images, template_name=template_name)
-PY
