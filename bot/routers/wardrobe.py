@@ -84,7 +84,7 @@ async def upload_start(message: Message, state: FSMContext) -> None:
     await message.answer("Выберите категорию:", reply_markup=category_keyboard())
 
 
-@router.message(F.text.in_({"📥 Загрузить", "Загрузить"}))
+@router.message(F.text.in_({"📥 Загрузить", "Загрузить", "📥 Добавить вещь"}))
 async def upload_start_short(message: Message, state: FSMContext) -> None:
     await upload_start(message, state)
 
@@ -169,7 +169,7 @@ async def upload_photo_prompt(message: Message) -> None:
 async def wardrobe_list(message: Message, state: FSMContext) -> None:
     counts = get_category_counts(message.from_user.id)
     if not counts:
-        await message.answer("Гардероб пока пуст. Нажмите 'Загрузить' и добавьте вещи.")
+        await message.answer("Гардероб пока пуст. Нажмите '📥 Добавить вещь' и добавьте вещи.")
         return
 
     await state.set_state(BotStates.wardrobe_view)
