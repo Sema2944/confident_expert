@@ -1,3 +1,4 @@
+cat > README.md <<'MD'
 # Telegram Wardrobe Bot (MVP)
 
 MVP scaffold for the wardrobe → outfits bot described in the technical specification.
@@ -7,6 +8,7 @@ MVP scaffold for the wardrobe → outfits bot described in the technical specifi
 - Outfit requests by occasion and season
 - Trial gating + subscription access
 - Optional voice intent extraction
+- Template-based photo processing tool (combine user photos into a fixed output format)
 - Feedback collection from users (`/feedback` and `📝 Обратная связь`)
 - Multi-user persistent wardrobe storage (SQLite)
 
@@ -49,3 +51,4 @@ python -m bot.main
 - Replace the prompt files in `prompts/` with the approved production versions.
 - Use a proper task queue (RQ/Celery) for image generation in production.
 - For pilot testing and feedback collection, use the built-in feedback flow and periodically export SQLite data.
+MD
