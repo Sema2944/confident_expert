@@ -149,6 +149,17 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
 
     await message.answer(build_russian_item_summary(category=category, analysis=analysis))
     await message.answer(
+        "Отлично. Эта вещь расширяет твои комбинации.\n"
+        "Добавь ещё несколько — и образы станут разнообразнее."
+    )
+
+    items = get_items(message.from_user.id)
+    if len(items) >= 5:
+        await message.answer(
+            "Теперь я могу собирать более точные и интересные сочетания."
+        )
+
+    await message.answer(
         "Отправьте следующее фото или нажмите ⬅️ Назад.",
         reply_markup=photo_upload_keyboard(),
     )
