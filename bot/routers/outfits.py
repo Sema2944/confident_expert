@@ -1,3 +1,5 @@
+import random
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
@@ -25,6 +27,13 @@ OCCASION_TITLES = {
     "casual": "Образ",
 }
 
+COMPLIMENTS = [
+    "Это спокойный и аккуратный вариант.",
+    "Хороший баланс цвета.",
+    "Этот вариант выглядит собранно и уверенно.",
+    "Сдержанно, но стильно.",
+]
+
 
 def _collect_outfit_file_ids(items_payload: dict[str, list[str]]) -> list[str]:
     category_order = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
@@ -44,7 +53,9 @@ async def _generate_and_show_outfit(
     items = get_items(message.from_user.id)
     if not items:
         await message.answer(
-            "Сначала добавьте вещи: нажмите '📥 Добавить вещь'.",
+            "Пока в гардеробе мало вещей.\n\n"
+            "Добавь хотя бы 3–5 позиций, и я смогу собрать гармоничный образ.\n"
+            "Начнём?",
             reply_markup=menu_keyboard(),
         )
         await state.set_state(BotStates.menu)
@@ -90,13 +101,23 @@ async def _generate_and_show_outfit(
             await message.answer_photo(photo=file_id)
 
     await state.set_state(BotStates.menu)
-    await message.answer("Готово.", reply_markup=menu_keyboard())
+    if random.random() < 0.3:
+        await message.answer(random.choice(COMPLIMENTS))
+    await message.answer(
+        "Готово.\n\n"
+        "Если хочешь — могу собрать альтернативный вариант.",
+        reply_markup=menu_keyboard(),
+    )
 
 
 @router.message(F.text == "👗 Собрать образы")
 async def request_outfit(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.request_occasion)
-    await message.answer("Выберите повод:", reply_markup=occasion_keyboard())
+    await message.answer(
+        "Куда ты сегодня идёшь?\n"
+        "Я подберу вариант, который будет уместным и уверенным.",
+        reply_markup=occasion_keyboard(),
+    )
 
 
 @router.message(F.text.in_({"✨ Собрать образ", "Образы", "✨ Образы", "👗 Собрать образы"}))
@@ -106,6 +127,7 @@ async def request_outfit_short(message: Message, state: FSMContext) -> None:
 
 @router.message(F.text == "🔥 Сегодня")
 async def outfit_today(message: Message, state: FSMContext) -> None:
+    await message.answer("Секунду. Подбираю вариант на сегодня…")
     await _generate_and_show_outfit(
         message=message,
         state=state,
