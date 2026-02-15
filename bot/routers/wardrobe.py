@@ -121,7 +121,7 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
 
     await message.answer(build_russian_item_summary(category=category, analysis=analysis))
     await message.answer(
-        "Можно отправить следующее фото или нажать ⬅️ Назад для смены категории.",
+        "Отправьте следующее фото или нажмите ⬅️ Назад.",
         reply_markup=photo_upload_keyboard(),
     )
 
