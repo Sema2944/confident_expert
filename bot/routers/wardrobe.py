@@ -4,8 +4,13 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.keyboards import category_keyboard, menu_keyboard, photo_upload_keyboard
-from bot.storage import add_item, get_category_counts
+from bot.keyboards import (
+    category_keyboard,
+    menu_keyboard,
+    photo_upload_keyboard,
+    wardrobe_view_keyboard,
+)
+from bot.storage import add_item, delete_item, get_category_counts, get_items
 from bot.states import BotStates
 from services.ai_analyze_service import AIAnalyzeService, build_russian_item_summary
 
@@ -48,6 +53,29 @@ CATEGORY_ALIASES = {
 def normalize_category(text: str) -> str | None:
     cleaned = (text or "").strip().lower()
     return CATEGORY_ALIASES.get(cleaned)
+
+
+def build_wardrobe_message(user_id: int) -> str:
+    counts = get_category_counts(user_id)
+    items = get_items(user_id)
+
+    lines = ["Ваш гардероб:"]
+    for category, count in sorted(counts.items()):
+        category_name = CATEGORIES.get(category, category)
+        lines.append(f"- {category_name}: {count}")
+
+    lines.append("")
+    lines.append("Вещи:")
+    for index, item in enumerate(items, start=1):
+        category_name = CATEGORIES.get(item["category"], item["category"])
+        color = item.get("primary_color", "unknown")
+        item_type = item.get("type", "unknown")
+        lines.append(f"{index}. {category_name} — {item_type}, {color}")
+
+    lines.append("")
+    lines.append("Чтобы удалить вещь, отправьте: Удалить <номер>")
+    lines.append("Например: Удалить 2")
+    return "\n".join(lines)
 
 
 @router.message(F.text == "📸 Загрузить гардероб")
@@ -138,14 +166,51 @@ async def upload_photo_prompt(message: Message) -> None:
 
 
 @router.message(F.text.in_({"🧺 Мой гардероб", "🧺 Гардероб"}))
-async def wardrobe_list(message: Message) -> None:
+async def wardrobe_list(message: Message, state: FSMContext) -> None:
     counts = get_category_counts(message.from_user.id)
     if not counts:
         await message.answer("Гардероб пока пуст. Нажмите 'Загрузить' и добавьте вещи.")
         return
 
-    lines = ["Ваш гардероб:"]
-    for category, count in sorted(counts.items()):
-        category_name = CATEGORIES.get(category, category)
-        lines.append(f"- {category_name}: {count}")
-    await message.answer("\n".join(lines))
+    await state.set_state(BotStates.wardrobe_view)
+    await message.answer(
+        build_wardrobe_message(message.from_user.id),
+        reply_markup=wardrobe_view_keyboard(),
+    )
+
+
+@router.message(BotStates.wardrobe_view, F.text == "⬅️ Назад")
+async def wardrobe_back_to_menu(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.menu)
+    await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+
+
+@router.message(BotStates.wardrobe_view, F.text.regexp(r"(?i)^удалить\s+\d+$"))
+async def delete_wardrobe_item(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        return
+
+    _, item_number_text = message.text.strip().split(maxsplit=1)
+    item_index = int(item_number_text) - 1
+    removed = delete_item(message.from_user.id, item_index)
+    if not removed:
+        await message.answer("Не нашёл вещь с таким номером. Проверьте список и попробуйте снова.")
+        return
+
+    items_left = get_items(message.from_user.id)
+    if not items_left:
+        await state.set_state(BotStates.menu)
+        await message.answer("Готово. Гардероб теперь пуст.", reply_markup=menu_keyboard())
+        return
+
+    await message.answer("Удалил вещь. Обновлённый список:")
+    await message.answer(build_wardrobe_message(message.from_user.id), reply_markup=wardrobe_view_keyboard())
+
+
+@router.message(BotStates.wardrobe_view)
+async def wardrobe_view_prompt(message: Message) -> None:
+    await message.answer(
+        "Чтобы удалить вещь, отправьте команду в формате: Удалить 3\n"
+        "Или нажмите ⬅️ Назад, чтобы вернуться в меню.",
+        reply_markup=wardrobe_view_keyboard(),
+    )
