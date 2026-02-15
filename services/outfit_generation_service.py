@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import random
 
 
 @dataclass
@@ -99,21 +100,23 @@ class OutfitService:
             return []
 
         results: list[OutfitResult] = []
+        start_offset = random.randint(0, 1_000_000)
         for index in range(count):
-            use_dress = bool(dresses and (not tops or not bottoms or index % 2 == 1))
+            item_offset = start_offset + index
+            use_dress = bool(dresses and (not tops or not bottoms or item_offset % 2 == 1))
 
-            top = None if use_dress else self._pick_with_offset(tops, index)
-            bottom = None if use_dress else self._pick_with_offset(bottoms, index)
-            dress = self._pick_with_offset(dresses, index) if use_dress else None
+            top = None if use_dress else self._pick_with_offset(tops, item_offset)
+            bottom = None if use_dress else self._pick_with_offset(bottoms, item_offset)
+            dress = self._pick_with_offset(dresses, item_offset) if use_dress else None
 
             if use_dress and not dress:
                 continue
             if not use_dress and (not top or not bottom):
                 continue
 
-            shoe = self._pick_with_offset(shoes, index)
-            outerwear = self._pick_with_offset(outerwears, index) if outerwears else None
-            accessory = self._pick_with_offset(accessories, index) if accessories else None
+            shoe = self._pick_with_offset(shoes, item_offset)
+            outerwear = self._pick_with_offset(outerwears, item_offset) if outerwears else None
+            accessory = self._pick_with_offset(accessories, item_offset) if accessories else None
 
             items_payload = {
                 "top": [top["telegram_file_id"]] if top else [],
