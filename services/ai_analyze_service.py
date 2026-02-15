@@ -149,7 +149,6 @@ class AIAnalyzeService:
             gender_hint="unknown",
         )
 
-
 _CATEGORY_RU = {
     "top": "верх",
     "bottom": "низ",
@@ -192,30 +191,5 @@ _GENDER_HINT_RU = {
 
 
 def build_russian_item_summary(category: str, analysis: ItemAnalysis) -> str:
-    _ = category
-    item_type = analysis.type if analysis.type and analysis.type != "unknown" else "тип не определён"
-    primary_color = (
-        analysis.primary_color
-        if analysis.primary_color and analysis.primary_color != "unknown"
-        else "не определён"
-    )
-    secondary_color = (
-        analysis.secondary_color
-        if analysis.secondary_color and analysis.secondary_color != "unknown"
-        else "не определён"
-    )
-    pattern = _PATTERN_RU.get(analysis.pattern or "unknown", "не определён")
-    season = _SEASON_RU.get(analysis.season or "unknown", "не определён")
-    formality = _FORMALITY_RU.get(analysis.formality or "unknown", "не определён")
-    gender_hint = _GENDER_HINT_RU.get(analysis.gender_hint or "unknown", "не определён")
-
-    return (
-        "Вещь добавлена в гардероб.\n"
-        f"Тип: {item_type}.\n"
-        f"Цвет: {primary_color}.\n"
-        f"Доп. цвет: {secondary_color}.\n"
-        f"Узор: {pattern}.\n"
-        f"Сезон: {season}.\n"
-        f"Стиль: {formality}.\n"
-        f"Гендер: {gender_hint}."
-    )
+    _ = category, analysis
+    return "Вещь добавлена в гардероб."
