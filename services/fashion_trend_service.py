@@ -163,7 +163,10 @@ class FashionTrendService:
         }
         colors = season_colors.get(season, "базовый беж, синий, белый")
         source_block = (
-            "\n".join(f"• {signal}" for signal in source_signals[:4])
+            "\n".join(
+                f"• {FashionTrendService._localize_signal_for_russian(signal)}"
+                for signal in source_signals[:4]
+            )
             if source_signals
             else "• Внешние источники временно недоступны."
         )
@@ -175,3 +178,34 @@ class FashionTrendService:
             "Тенденции года: мягкий тейлоринг, многослойность, аккуратные акценты цветом.\n"
             "Совет: выбери 1 трендовый цвет и сочетай его с базовыми вещами своего гардероба."
         )
+
+    @staticmethod
+    def _localize_signal_for_russian(signal: str) -> str:
+        source, separator, title = signal.partition("::")
+        source_label = FashionTrendService._source_label(source.strip())
+        clean_title = title.strip() if separator else ""
+
+        if clean_title and any("а" <= char.lower() <= "я" for char in clean_title):
+            return f"{source_label}: {clean_title}"
+
+        if clean_title:
+            return (
+                f"{source_label}: свежий англоязычный материал о текущих модных трендах "
+                "(перевод заголовка недоступен)."
+            )
+
+        if source_label:
+            return f"{source_label}: внешний сигнал по трендам без доступного заголовка."
+
+        return "Внешний сигнал по трендам без доступного заголовка."
+
+    @staticmethod
+    def _source_label(raw_source: str) -> str:
+        source = raw_source.strip()
+        if "vogue.com" in source:
+            return "Vogue"
+        if "whowhatwear.com" in source:
+            return "Who What Wear"
+        if source:
+            return source
+        return "Источник"
