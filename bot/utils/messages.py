@@ -7,7 +7,8 @@ HELP_MESSAGE = (
     "Команды:\n"
     "/start — начать\n"
     "/menu — меню\n"
-    "/help — помощь"
+    "/help — помощь\n"
+    "/feedback — оставить обратную связь"
 )
 
 PAYWALL_MESSAGE = (
