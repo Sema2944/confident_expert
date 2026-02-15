@@ -35,6 +35,15 @@ def get_items(user_id: int) -> list[dict[str, str]]:
     return list(_WARDROBE_ITEMS.get(user_id, []))
 
 
+def delete_item(user_id: int, item_index: int) -> dict[str, str] | None:
+    user_items = _WARDROBE_ITEMS.get(user_id)
+    if not user_items:
+        return None
+    if item_index < 0 or item_index >= len(user_items):
+        return None
+    return user_items.pop(item_index)
+
+
 def get_category_counts(user_id: int) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
     for item in _WARDROBE_ITEMS.get(user_id, []):
