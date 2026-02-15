@@ -1,12 +1,19 @@
+cat > services/outfit_service.py <<'PY'
 from io import BytesIO
 
 from services.outfit_generation_service import OutfitResult, OutfitService
+from services.photo_template_service import PhotoTemplateService
 
 
 class OutfitImageService:
     _CATEGORY_ORDER = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
 
-    async def render_outfit_image(self, bot, items_payload: dict[str, list[str]]) -> bytes | None:
+    async def render_outfit_image(
+        self,
+        bot,
+        items_payload: dict[str, list[str]],
+        template_name: str = "outfit_story",
+    ) -> bytes | None:
         from PIL import Image
 
         category_images: dict[str, Image.Image] = {}
@@ -21,7 +28,7 @@ class OutfitImageService:
         if not category_images:
             return None
 
-        composed = self._compose_outfit(category_images)
+        composed = self._compose_outfit(category_images, template_name=template_name)
         buffer = BytesIO()
         composed.save(buffer, format="PNG")
         return buffer.getvalue()
@@ -41,46 +48,23 @@ class OutfitImageService:
             return None
 
     @staticmethod
-    def _compose_outfit(category_images):
-        from PIL import Image
-
-        canvas_width = 1536
-        canvas_height = 2304
-        canvas = Image.new("RGB", (canvas_width, canvas_height), color=(255, 255, 255))
-
-        slots = {
-            "outerwear": (318, 60, 900, 820),
-            "top": (318, 140, 900, 760),
-            "dress": (278, 120, 980, 1520),
-            "bottom": (338, 860, 860, 980),
-            "shoes": (378, 1860, 780, 360),
-            "accessories": (1090, 150, 320, 320),
-        }
-
+    def _compose_outfit(category_images, template_name: str):
+        template_images = {}
         if category_images.get("dress") is not None:
-            OutfitImageService._paste_contained(canvas, category_images["dress"], slots["dress"])
+            template_images["dress"] = category_images["dress"]
         else:
             if category_images.get("outerwear") is not None:
-                OutfitImageService._paste_contained(canvas, category_images["outerwear"], slots["outerwear"])
+                template_images["outerwear"] = category_images["outerwear"]
             if category_images.get("top") is not None:
-                OutfitImageService._paste_contained(canvas, category_images["top"], slots["top"])
+                template_images["top"] = category_images["top"]
             if category_images.get("bottom") is not None:
-                OutfitImageService._paste_contained(canvas, category_images["bottom"], slots["bottom"])
+                template_images["bottom"] = category_images["bottom"]
 
         if category_images.get("shoes") is not None:
-            OutfitImageService._paste_contained(canvas, category_images["shoes"], slots["shoes"])
+            template_images["shoes"] = category_images["shoes"]
 
         if category_images.get("accessories") is not None:
-            OutfitImageService._paste_contained(canvas, category_images["accessories"], slots["accessories"])
+            template_images["accessories"] = category_images["accessories"]
 
-        return canvas
-
-    @staticmethod
-    def _paste_contained(canvas, source, box):
-        from PIL import Image, ImageOps
-
-        x, y, w, h = box
-        fitted = ImageOps.contain(source, (w, h), method=Image.Resampling.LANCZOS)
-        paste_x = x + (w - fitted.width) // 2
-        paste_y = y + (h - fitted.height) // 2
-        canvas.paste(fitted, (paste_x, paste_y))
+        return PhotoTemplateService.compose(template_images, template_name=template_name)
+PY
