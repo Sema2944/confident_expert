@@ -10,3 +10,4 @@ class BotStates(StatesGroup):
     request_season = State()
     generating = State()
     subscription = State()
+    feedback_waiting_text = State()
