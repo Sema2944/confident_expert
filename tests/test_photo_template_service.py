@@ -1,4 +1,3 @@
-cat > tests/test_photo_template_service.py <<'PY'
 import unittest
 
 from services.photo_template_service import PhotoTemplateService
@@ -26,4 +25,3 @@ class PhotoTemplateServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-PY
