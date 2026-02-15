@@ -58,3 +58,10 @@ def photo_upload_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[[KeyboardButton(text="⬅️ Назад")]],
         resize_keyboard=True,
     )
+
+
+def wardrobe_view_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+        resize_keyboard=True,
+    )
