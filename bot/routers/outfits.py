@@ -34,48 +34,27 @@ def _collect_outfit_file_ids(items_payload: dict[str, list[str]]) -> list[str]:
     return file_ids
 
 
-@router.message(F.text == "👗 Собрать образы")
-async def request_outfit(message: Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.request_occasion)
-    await message.answer("Выберите повод:", reply_markup=occasion_keyboard())
-
-
-@router.message(F.text.in_({"Образы", "✨ Образы", "👗 Собрать образы"}))
-async def request_outfit_short(message: Message, state: FSMContext) -> None:
-    await request_outfit(message, state)
-
-
-@router.message(BotStates.request_occasion, F.text)
-async def set_occasion(message: Message, state: FSMContext) -> None:
-    if message.text == "⬅️ Назад":
-        await state.set_state(BotStates.menu)
-        await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
-        return
-
-    occasion = OCCASIONS.get(message.text)
-    if not occasion:
-        await message.answer("Не понял повод. Выберите кнопку.")
-        return
-    await state.update_data(occasion=occasion)
-    season = "all"
-
+async def _generate_and_show_outfit(
+    message: Message,
+    state: FSMContext,
+    occasion_code: str,
+    season: str = "all",
+    count: int = 1,
+) -> None:
     items = get_items(message.from_user.id)
     if not items:
         await message.answer(
-            "Сначала загрузите гардероб: добавьте несколько вещей, затем соберите образы.",
+            "Сначала добавьте вещи: нажмите '📥 Добавить вещь'.",
             reply_markup=menu_keyboard(),
         )
         await state.set_state(BotStates.menu)
         return
 
-    state_data = await state.get_data()
-    occasion_code = state_data.get("occasion", "casual")
-
     outfits = await outfit_service.generate_outfits(
         items=items,
         occasion=occasion_code,
         season=season,
-        count=1,
+        count=count,
     )
 
     if not outfits:
@@ -112,3 +91,46 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
 
     await state.set_state(BotStates.menu)
     await message.answer("Готово.", reply_markup=menu_keyboard())
+
+
+@router.message(F.text == "👗 Собрать образы")
+async def request_outfit(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.request_occasion)
+    await message.answer("Выберите повод:", reply_markup=occasion_keyboard())
+
+
+@router.message(F.text.in_({"✨ Собрать образ", "Образы", "✨ Образы", "👗 Собрать образы"}))
+async def request_outfit_short(message: Message, state: FSMContext) -> None:
+    await request_outfit(message, state)
+
+
+@router.message(F.text == "🔥 Сегодня")
+async def outfit_today(message: Message, state: FSMContext) -> None:
+    await _generate_and_show_outfit(
+        message=message,
+        state=state,
+        occasion_code="casual",
+        season="all",
+        count=1,
+    )
+
+
+@router.message(BotStates.request_occasion, F.text)
+async def set_occasion(message: Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Назад":
+        await state.set_state(BotStates.menu)
+        await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+        return
+
+    occasion = OCCASIONS.get(message.text)
+    if not occasion:
+        await message.answer("Не понял повод. Выберите кнопку.")
+        return
+    await state.update_data(occasion=occasion)
+    await _generate_and_show_outfit(
+        message=message,
+        state=state,
+        occasion_code=occasion,
+        season="all",
+        count=1,
+    )
