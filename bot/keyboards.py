@@ -12,7 +12,10 @@ def menu_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🧺 Гардероб"),
                 KeyboardButton(text="💳 Подписка"),
             ],
-            [KeyboardButton(text="🎨 Модные тренды")],
+            [
+                KeyboardButton(text="🎨 Модные тренды"),
+                KeyboardButton(text="📝 Обратная связь"),
+            ],
         ],
         resize_keyboard=True,
     )
