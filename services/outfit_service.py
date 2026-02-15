@@ -1,3 +1,8 @@
+from io import BytesIO
+
+from services.outfit_generation_service import OutfitResult, OutfitService
+
+
 class OutfitImageService:
     _CATEGORY_ORDER = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
 
