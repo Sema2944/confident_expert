@@ -1,0 +1,38 @@
+FILE: tests/test_outfits_router.py
+
+import unittest
+
+from bot.outfit_feedback import collect_outfit_file_ids, items_payload_signature
+
+
+class OutfitRouterHelpersTests(unittest.TestCase):
+    def test_collect_outfit_file_ids_respects_display_order(self) -> None:
+        payload = {
+            "bottom": ["bottom-1"],
+            "top": ["top-1"],
+            "shoes": ["shoes-1"],
+            "accessories": ["acc-1"],
+        }
+
+        self.assertEqual(
+            collect_outfit_file_ids(payload),
+            ["top-1", "bottom-1", "shoes-1", "acc-1"],
+        )
+
+    def test_items_payload_signature_detects_same_payload(self) -> None:
+        first = {
+            "top": ["top-1"],
+            "bottom": ["bottom-1"],
+            "shoes": ["shoes-1"],
+        }
+        second = {
+            "shoes": ["shoes-1"],
+            "bottom": ["bottom-1"],
+            "top": ["top-1"],
+        }
+
+        self.assertEqual(items_payload_signature(first), items_payload_signature(second))
+
+
+if __name__ == "__main__":
+    unittest.main()
