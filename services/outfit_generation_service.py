@@ -12,6 +12,35 @@ class OutfitResult:
 
 class OutfitService:
     _IMAGE_PROMPT_TEMPLATE = Path(__file__).resolve().parents[1] / "prompts" / "image_generation.txt"
+    _CATEGORY_ALIASES: dict[str, str] = {
+        "top": "top",
+        "tops": "top",
+        "верх": "top",
+        "bottom": "bottom",
+        "bottoms": "bottom",
+        "низ": "bottom",
+        "onepiece": "onepiece",
+        "dress": "onepiece",
+        "dresses": "onepiece",
+        "цельный образ": "onepiece",
+        "платье": "onepiece",
+        "outerwear": "outerwear",
+        "верхняя одежда": "outerwear",
+        "shoe": "shoes",
+        "shoes": "shoes",
+        "обувь": "shoes",
+        "accessory": "accessory",
+        "accessories": "accessory",
+        "аксессуар": "accessory",
+        "аксессуары": "accessory",
+    }
+
+    @classmethod
+    def _normalize_category(cls, category: str | None) -> str | None:
+        if not category:
+            return None
+        cleaned = category.strip().lower()
+        return cls._CATEGORY_ALIASES.get(cleaned, cleaned)
 
     @staticmethod
     def _pick_with_offset(values: list[dict], offset: int) -> dict | None:
@@ -84,7 +113,7 @@ class OutfitService:
     ) -> list[OutfitResult]:
         grouped: dict[str, list[dict]] = {}
         for item in items:
-            category = item.get("category")
+            category = self._normalize_category(item.get("category"))
             if not category:
                 continue
             grouped.setdefault(category, []).append(item)
