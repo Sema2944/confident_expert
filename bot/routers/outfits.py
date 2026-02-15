@@ -2,7 +2,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
 
-from bot.keyboards import menu_keyboard, occasion_keyboard, season_keyboard
+from bot.keyboards import menu_keyboard, occasion_keyboard
 from bot.storage import get_items
 from bot.states import BotStates
 from services.outfit_generation_service import OutfitService
@@ -16,12 +16,6 @@ OCCASIONS = {
     "🏢 Работа/офис": "work_office",
     "✨ Выход в люди": "going_out",
     "🎒 Спорт/прогулки": "sport_travel",
-}
-
-SEASONS = {
-    "❄️ Зима": "winter",
-    "🍂 Весна/осень": "demi",
-    "☀️ Лето": "summer",
 }
 
 OCCASION_TITLES = {
@@ -63,22 +57,7 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
         await message.answer("Не понял повод. Выберите кнопку.")
         return
     await state.update_data(occasion=occasion)
-    await state.set_state(BotStates.request_season)
-    await message.answer("Выберите сезон:", reply_markup=season_keyboard())
-
-
-@router.message(BotStates.request_season, F.text)
-async def set_season(message: Message, state: FSMContext) -> None:
-    if message.text == "⬅️ Назад":
-        await state.set_state(BotStates.request_occasion)
-        await message.answer("Выберите повод:", reply_markup=occasion_keyboard())
-        return
-
-    season = SEASONS.get(message.text)
-    if not season:
-        await message.answer("Не понял сезон. Выберите кнопку.")
-        return
-    await state.update_data(season=season)
+    season = "all"
 
     items = get_items(message.from_user.id)
     if not items:
