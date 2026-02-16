@@ -1,4 +1,4 @@
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 
 def menu_keyboard() -> ReplyKeyboardMarkup:
@@ -64,4 +64,16 @@ def wardrobe_view_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="⬅️ Назад")]],
         resize_keyboard=True,
+    )
+
+
+def outfit_reaction_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👍 Нравится", callback_data="outfit:like"),
+                InlineKeyboardButton(text="🔄 Другой вариант", callback_data="outfit:reroll"),
+            ],
+            [InlineKeyboardButton(text="🧠 Почему так?", callback_data="outfit:why")],
+        ]
     )
