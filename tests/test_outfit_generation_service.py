@@ -35,5 +35,20 @@ class OutfitGenerationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outfits[0].items["shoes"], ["shoe-1"])
 
 
+    async def test_prefers_processed_file_id_for_payload(self) -> None:
+        service = OutfitService()
+        items = [
+            {"category": "top", "telegram_file_id": "top-raw", "processed_file_id": "top-processed"},
+            {"category": "bottom", "telegram_file_id": "bottom-raw"},
+            {"category": "shoes", "telegram_file_id": "shoes-raw", "processed_file_id": "shoes-processed"},
+        ]
+
+        outfits = await service.generate_outfits(items=items, occasion="casual", season="all", count=1)
+
+        self.assertEqual(len(outfits), 1)
+        self.assertEqual(outfits[0].items["top"], ["top-processed"])
+        self.assertEqual(outfits[0].items["bottom"], ["bottom-raw"])
+        self.assertEqual(outfits[0].items["shoes"], ["shoes-processed"])
+
 if __name__ == "__main__":
     unittest.main()
