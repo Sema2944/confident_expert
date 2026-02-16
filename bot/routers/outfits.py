@@ -8,12 +8,14 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard
 from bot.storage import get_items
 from bot.states import BotStates
+from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
 from services.outfit_service import OutfitImageService
 
 router = Router()
 outfit_service = OutfitService()
 outfit_image_service = OutfitImageService()
+image_service = ImageService()
 
 OCCASIONS = {
     "🏢 Работа/офис": "work_office",
@@ -54,11 +56,13 @@ async def _remember_outfit(
     items_payload: dict[str, list[str]],
     occasion_code: str,
     season: str,
+    image_prompt: str | None,
 ) -> None:
     await state.update_data(
         last_outfit_items_payload=items_payload,
         last_occasion_code=occasion_code,
         last_season=season,
+        last_image_prompt=image_prompt,
     )
 
 
@@ -108,7 +112,6 @@ async def _generate_and_show_outfit(
         outfit_image = await outfit_image_service.render_outfit_image(
             bot=message.bot,
             items_payload=outfit.items,
-            image_prompt=outfit.image_prompt,
         )
         if outfit_image:
             await message.answer_photo(
@@ -130,11 +133,11 @@ async def _generate_and_show_outfit(
             items_payload=outfit.items,
             occasion_code=occasion_code,
             season=season,
+            image_prompt=outfit.image_prompt,
         )
         await _log_outfit_event("outfit_shown", message, occasion=occasion_code, season=season)
         await _send_outfit_reaction_prompt(message)
 
-    await state.set_state(BotStates.menu)
     if shown_count > 0 and random.random() < 0.3:
         await message.answer(random.choice(COMPLIMENTS))
 
@@ -167,102 +170,146 @@ def _build_why_text(items_payload: dict[str, list[str]]) -> str:
 
 @router.callback_query(F.data == "outfit:like")
 async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    if not data.get("last_outfit_items_payload"):
-        await callback.answer("Не вижу последний образ…", show_alert=True)
-        return
-
     await callback.answer()
-    if callback.message:
-        await callback.message.answer("Отлично. Я буду учитывать это при следующих подборках.", reply_markup=menu_keyboard())
-        await _log_outfit_event("outfit_like", callback.message)
+    try:
+        data = await state.get_data()
+        if not data.get("last_outfit_items_payload"):
+            if callback.message:
+                await callback.message.answer("Не вижу последний образ…")
+            return
+
+        if callback.message:
+            await callback.message.answer("Отлично. Я буду учитывать это при следующих подборках.", reply_markup=menu_keyboard())
+            await _log_outfit_event("outfit_like", callback.message)
+    except Exception:
+        logging.exception("Failed to handle outfit like callback")
 
 
 @router.callback_query(F.data == "outfit:why")
 async def why_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    items_payload = data.get("last_outfit_items_payload")
-    if not items_payload:
-        await callback.answer("Не вижу последний образ…", show_alert=True)
-        return
-
     await callback.answer()
-    if callback.message:
-        await callback.message.answer(_build_why_text(items_payload), reply_markup=outfit_reaction_keyboard())
-        await _log_outfit_event("outfit_why", callback.message)
+    try:
+        data = await state.get_data()
+        items_payload = data.get("last_outfit_items_payload")
+        if not items_payload:
+            if callback.message:
+                await callback.message.answer("Не вижу последний образ…")
+            return
+
+        if callback.message:
+            await callback.message.answer(_build_why_text(items_payload), reply_markup=outfit_reaction_keyboard())
+            await _log_outfit_event("outfit_why", callback.message)
+    except Exception:
+        logging.exception("Failed to handle outfit why callback")
 
 
 @router.callback_query(F.data == "outfit:reroll")
 async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    last_items = data.get("last_outfit_items_payload")
-    occasion_code = data.get("last_occasion_code")
-    season = data.get("last_season", "all")
-
-    if not last_items or not occasion_code:
-        await callback.answer("Не вижу последний образ…", show_alert=True)
-        return
-
     await callback.answer()
-    if not callback.message:
-        return
+    try:
+        data = await state.get_data()
+        last_items = data.get("last_outfit_items_payload")
+        occasion_code = data.get("last_occasion_code")
+        season = data.get("last_season", "all")
 
-    await callback.message.answer("Собираю альтернативный вариант…")
-    await _log_outfit_event("outfit_reroll", callback.message, occasion=occasion_code, season=season)
-
-    items = get_items(callback.from_user.id)
-    if not items:
-        await callback.message.answer(
-            "Пока в гардеробе мало вещей. Добавь ещё вещи, и я соберу альтернативу.",
-            reply_markup=menu_keyboard(),
-        )
-        return
-
-    new_outfit: OutfitResult | None = None
-    for _ in range(3):
-        candidates = await outfit_service.generate_outfits(
-            items=items,
-            occasion=occasion_code,
-            season=season,
-            count=1,
-        )
-        if not candidates:
-            break
-        if candidates[0].items != last_items:
-            new_outfit = candidates[0]
-            break
-
-    if new_outfit is None:
-        await callback.message.answer(
-            "Сейчас это самый близкий вариант… Добавь ещё вещей, чтобы я собрала более разнообразные образы.",
-            reply_markup=outfit_reaction_keyboard(),
-        )
-        return
-
-    title = OCCASION_TITLES.get(occasion_code, "Образ")
-    await callback.message.answer(title)
-
-    outfit_image = await outfit_image_service.render_outfit_image(
-        bot=callback.message.bot,
-        items_payload=new_outfit.items,
-        image_prompt=new_outfit.image_prompt,
-    )
-
-    if outfit_image:
-        await callback.message.answer_photo(photo=BufferedInputFile(outfit_image, filename="outfit.png"))
-    else:
-        outfit_file_ids = _collect_outfit_file_ids(new_outfit.items)
-        if not outfit_file_ids:
-            await callback.message.answer("Не получилось показать этот образ. Попробуйте еще раз чуть позже.")
+        if not last_items or not occasion_code:
+            if callback.message:
+                await callback.message.answer("Не вижу последний образ…")
             return
 
-        await callback.message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
-        for file_id in outfit_file_ids:
-            await callback.message.answer_photo(photo=file_id)
+        if not callback.message:
+            return
 
-    await _remember_outfit(state, new_outfit.items, occasion_code=occasion_code, season=season)
-    await _log_outfit_event("outfit_shown", callback.message, occasion=occasion_code, season=season)
-    await _send_outfit_reaction_prompt(callback.message)
+        await callback.message.answer("Собираю альтернативный вариант…")
+        await _log_outfit_event("outfit_reroll", callback.message, occasion=occasion_code, season=season)
+
+        items = get_items(callback.from_user.id)
+        if not items:
+            await callback.message.answer(
+                "Пока в гардеробе мало вещей. Добавь ещё вещи, и я соберу альтернативу.",
+                reply_markup=menu_keyboard(),
+            )
+            return
+
+        new_outfit: OutfitResult | None = None
+        for _ in range(3):
+            candidates = await outfit_service.generate_outfits(
+                items=items,
+                occasion=occasion_code,
+                season=season,
+                count=1,
+            )
+            if not candidates:
+                break
+            if candidates[0].items != last_items:
+                new_outfit = candidates[0]
+                break
+
+        if new_outfit is None:
+            await callback.message.answer(
+                "Сейчас это самый близкий вариант… Добавь ещё вещей, чтобы я собрала более разнообразные образы.",
+                reply_markup=outfit_reaction_keyboard(),
+            )
+            return
+
+        title = OCCASION_TITLES.get(occasion_code, "Образ")
+        await callback.message.answer(title)
+
+        outfit_image = await outfit_image_service.render_outfit_image(
+            bot=callback.message.bot,
+            items_payload=new_outfit.items,
+        )
+
+        if outfit_image:
+            await callback.message.answer_photo(photo=BufferedInputFile(outfit_image, filename="outfit.png"))
+        else:
+            outfit_file_ids = _collect_outfit_file_ids(new_outfit.items)
+            if not outfit_file_ids:
+                await callback.message.answer("Не получилось показать этот образ. Попробуйте еще раз чуть позже.")
+                return
+
+            await callback.message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
+            for file_id in outfit_file_ids:
+                await callback.message.answer_photo(photo=file_id)
+
+        await _remember_outfit(
+            state,
+            new_outfit.items,
+            occasion_code=occasion_code,
+            season=season,
+            image_prompt=new_outfit.image_prompt,
+        )
+        await _log_outfit_event("outfit_shown", callback.message, occasion=occasion_code, season=season)
+        await _send_outfit_reaction_prompt(callback.message)
+    except Exception:
+        logging.exception("Failed to handle outfit reroll callback")
+
+
+@router.callback_query(F.data == "outfit:visualize")
+async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    try:
+        if not callback.message:
+            return
+
+        data = await state.get_data()
+        image_prompt = data.get("last_image_prompt")
+        if not image_prompt:
+            await callback.message.answer("Не вижу описание последнего образа для визуализации.")
+            return
+
+        generated = await image_service.generate_image(image_prompt)
+        if not generated:
+            await callback.message.answer("Не удалось подготовить визуализацию. Попробуйте чуть позже.")
+            return
+
+        await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
+        await callback.message.answer_photo(
+            photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
+        )
+        await _log_outfit_event("outfit_visualize", callback.message)
+    except Exception:
+        logging.exception("Failed to handle outfit visualize callback")
 
 
 @router.message(F.text == "👗 Собрать образы")
