@@ -22,10 +22,20 @@ def build_dispatcher() -> Dispatcher:
     return dispatcher
 
 
+def _log_router_overview(dispatcher: Dispatcher) -> None:
+    routers = list(getattr(dispatcher, "sub_routers", []))
+    logging.info("Connected routers (%s): %s", len(routers), ", ".join(router.name for router in routers))
+
+    for router in routers:
+        callback_handlers = len(router.observers["callback_query"].handlers)
+        logging.info("Router '%s' callback_query handlers: %s", router.name, callback_handlers)
+
+
 async def main() -> None:
     setup_logging(settings.log_level)
     bot = Bot(token=settings.bot_token)
     dispatcher = build_dispatcher()
+    _log_router_overview(dispatcher)
 
     await bot.delete_webhook(drop_pending_updates=True)
 
