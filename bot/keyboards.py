@@ -74,6 +74,9 @@ def outfit_reaction_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="👍 Нравится", callback_data="outfit:like"),
                 InlineKeyboardButton(text="🔄 Другой вариант", callback_data="outfit:reroll"),
             ],
-            [InlineKeyboardButton(text="🧠 Почему так?", callback_data="outfit:why")],
+            [
+                InlineKeyboardButton(text="🧠 Почему так?", callback_data="outfit:why"),
+                InlineKeyboardButton(text="✨ Визуализация", callback_data="outfit:visualize"),
+            ],
         ]
     )
