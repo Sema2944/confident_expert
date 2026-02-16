@@ -24,11 +24,21 @@ def _init_storage() -> None:
                 user_id INTEGER NOT NULL,
                 category TEXT NOT NULL,
                 telegram_file_id TEXT NOT NULL,
+                processed_file_id TEXT,
+                display_name TEXT,
                 metadata_json TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(wardrobe_items)").fetchall()
+        }
+        if "processed_file_id" not in columns:
+            connection.execute("ALTER TABLE wardrobe_items ADD COLUMN processed_file_id TEXT")
+        if "display_name" not in columns:
+            connection.execute("ALTER TABLE wardrobe_items ADD COLUMN display_name TEXT")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS feedback_messages (
@@ -56,7 +66,9 @@ def add_item(
     season: str | None = None,
     formality: str | None = None,
     gender_hint: str | None = None,
-) -> None:
+    processed_file_id: str | None = None,
+    display_name: str | None = None,
+) -> int:
     metadata = {
         "type": item_type or "unknown",
         "primary_color": primary_color or "unknown",
@@ -68,71 +80,38 @@ def add_item(
     }
 
     with _connect() as connection:
-        connection.execute(
+        cursor = connection.execute(
             """
-            INSERT INTO wardrobe_items (user_id, category, telegram_file_id, metadata_json)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO wardrobe_items (
+                user_id,
+                category,
+                telegram_file_id,
+                processed_file_id,
+                display_name,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, category, telegram_file_id, json.dumps(metadata, ensure_ascii=False)),
+            (
+                user_id,
+                category,
+                telegram_file_id,
+                processed_file_id,
+                display_name,
+                json.dumps(metadata, ensure_ascii=False),
+            ),
         )
+        return int(cursor.lastrowid)
 
 
-def get_items(user_id: int) -> list[dict[str, str]]:
-    with _connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT category, telegram_file_id, metadata_json
-            FROM wardrobe_items
-            WHERE user_id = ?
-            ORDER BY id ASC
-            """,
-            (user_id,),
-        ).fetchall()
-
-    items: list[dict[str, str]] = []
-    for row in rows:
-        metadata = json.loads(row["metadata_json"])
-        items.append(
-            {
-                "category": row["category"],
-                "telegram_file_id": row["telegram_file_id"],
-                "type": metadata.get("type", "unknown"),
-                "primary_color": metadata.get("primary_color", "unknown"),
-                "secondary_color": metadata.get("secondary_color", "unknown"),
-                "pattern": metadata.get("pattern", "unknown"),
-                "season": metadata.get("season", "unknown"),
-                "formality": metadata.get("formality", "unknown"),
-                "gender_hint": metadata.get("gender_hint", "unknown"),
-            }
-        )
-    return items
-
-
-def delete_item(user_id: int, item_index: int) -> dict[str, str] | None:
-    if item_index < 0:
-        return None
-
-    with _connect() as connection:
-        row = connection.execute(
-            """
-            SELECT id, category, telegram_file_id, metadata_json
-            FROM wardrobe_items
-            WHERE user_id = ?
-            ORDER BY id ASC
-            LIMIT 1 OFFSET ?
-            """,
-            (user_id, item_index),
-        ).fetchone()
-
-        if not row:
-            return None
-
-        connection.execute("DELETE FROM wardrobe_items WHERE id = ?", (row["id"],))
-
+def _build_item_payload(row: sqlite3.Row) -> dict[str, str | int | None]:
     metadata = json.loads(row["metadata_json"])
     return {
+        "id": row["id"],
         "category": row["category"],
         "telegram_file_id": row["telegram_file_id"],
+        "processed_file_id": row["processed_file_id"],
+        "display_name": row["display_name"],
         "type": metadata.get("type", "unknown"),
         "primary_color": metadata.get("primary_color", "unknown"),
         "secondary_color": metadata.get("secondary_color", "unknown"),
@@ -141,6 +120,92 @@ def delete_item(user_id: int, item_index: int) -> dict[str, str] | None:
         "formality": metadata.get("formality", "unknown"),
         "gender_hint": metadata.get("gender_hint", "unknown"),
     }
+
+
+def get_items(user_id: int) -> list[dict[str, str | int | None]]:
+    with _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
+            FROM wardrobe_items
+            WHERE user_id = ?
+            ORDER BY id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    return [_build_item_payload(row) for row in rows]
+
+
+def delete_item_by_id(user_id: int, item_id: int) -> dict[str, str | int | None] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
+            FROM wardrobe_items
+            WHERE id = ? AND user_id = ?
+            """,
+            (item_id, user_id),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        connection.execute("DELETE FROM wardrobe_items WHERE id = ? AND user_id = ?", (item_id, user_id))
+
+    return _build_item_payload(row)
+
+
+def update_processed_file_id(user_id: int, item_id: int, file_id: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE wardrobe_items
+            SET processed_file_id = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (file_id, item_id, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def update_display_name(user_id: int, item_id: int, display_name: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE wardrobe_items
+            SET display_name = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (display_name.strip() or None, item_id, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def update_item_metadata(user_id: int, item_id: int, metadata: dict[str, str]) -> bool:
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT metadata_json
+            FROM wardrobe_items
+            WHERE id = ? AND user_id = ?
+            """,
+            (item_id, user_id),
+        ).fetchone()
+        if not row:
+            return False
+
+        existing = json.loads(row["metadata_json"])
+        existing.update(metadata)
+        cursor = connection.execute(
+            """
+            UPDATE wardrobe_items
+            SET metadata_json = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (json.dumps(existing, ensure_ascii=False), item_id, user_id),
+        )
+    return cursor.rowcount > 0
 
 
 def get_category_counts(user_id: int) -> dict[str, int]:
