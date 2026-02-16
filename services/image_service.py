@@ -12,14 +12,26 @@ class ImageService:
             logging.warning("IMAGE_API_KEY is empty; image generation is disabled.")
             return None
 
+        requested_size = settings.image_size
+        image_bytes = await self._request_image(prompt=outfit_description, size=requested_size)
+        if image_bytes is not None:
+            return image_bytes
+
+        if requested_size != "1024x1024":
+            logging.info("Retrying image generation with fallback size 1024x1024.")
+            return await self._request_image(prompt=outfit_description, size="1024x1024")
+
+        return None
+
+    async def _request_image(self, prompt: str, size: str) -> bytes | None:
         headers = {
             "Authorization": f"Bearer {settings.image_api_key}",
             "Content-Type": "application/json",
         }
         payload = {
             "model": settings.image_model,
-            "prompt": outfit_description,
-            "size": "1024x1024",
+            "prompt": prompt,
+            "size": size,
         }
 
         try:
@@ -30,6 +42,12 @@ class ImageService:
                     json=payload,
                 )
                 response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            if self._is_unsupported_size_error(error):
+                logging.warning("Image API does not support size %s for model %s.", size, settings.image_model)
+                return None
+            logging.exception("Image generation request failed: %s", error)
+            return None
         except Exception as error:
             logging.exception("Image generation request failed: %s", error)
             return None
@@ -56,3 +74,8 @@ class ImageService:
 
         logging.warning("Image API response has neither b64_json nor url.")
         return None
+
+    @staticmethod
+    def _is_unsupported_size_error(error: httpx.HTTPStatusError) -> bool:
+        response_text = (error.response.text or "").lower()
+        return "size" in response_text and "unsupported" in response_text
