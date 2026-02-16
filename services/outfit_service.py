@@ -1,18 +1,27 @@
 from io import BytesIO
 
-from services.outfit_generation_service import OutfitResult, OutfitService
+from services.image_service import ImageService
 from services.photo_template_service import PhotoTemplateService
 
 
 class OutfitImageService:
     _CATEGORY_ORDER = ["top", "bottom", "dress", "outerwear", "shoes", "accessories"]
 
+    def __init__(self) -> None:
+        self._image_service = ImageService()
+
     async def render_outfit_image(
         self,
         bot,
         items_payload: dict[str, list[str]],
+        image_prompt: str | None = None,
         template_name: str = "outfit_story",
     ) -> bytes | None:
+        if image_prompt:
+            generated = await self._image_service.generate_image(image_prompt)
+            if generated:
+                return generated
+
         from PIL import Image
 
         category_images: dict[str, Image.Image] = {}
