@@ -156,6 +156,33 @@ def delete_item_by_id(user_id: int, item_id: int) -> dict[str, str | int | None]
     return _build_item_payload(row)
 
 
+def delete_item(user_id: int, item_index: int) -> dict[str, str | int | None] | None:
+    """Backward-compatible deletion by list index.
+
+    Kept to avoid runtime import/attribute errors in deployments that may still
+    reference the old API while rolling updates.
+    """
+    if item_index < 0:
+        return None
+
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id
+            FROM wardrobe_items
+            WHERE user_id = ?
+            ORDER BY id ASC
+            LIMIT 1 OFFSET ?
+            """,
+            (user_id, item_index),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return delete_item_by_id(user_id=user_id, item_id=int(row["id"]))
+
+
 def update_processed_file_id(user_id: int, item_id: int, file_id: str) -> bool:
     with _connect() as connection:
         cursor = connection.execute(
