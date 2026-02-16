@@ -43,6 +43,18 @@ class OutfitService:
         return cls._CATEGORY_ALIASES.get(cleaned, cleaned)
 
     @staticmethod
+    def _preferred_file_id(item: dict | None) -> str | None:
+        if not item:
+            return None
+        processed = item.get("processed_file_id")
+        if isinstance(processed, str) and processed.strip():
+            return processed
+        original = item.get("telegram_file_id")
+        if isinstance(original, str) and original.strip():
+            return original
+        return None
+
+    @staticmethod
     def _pick_with_offset(values: list[dict], offset: int) -> dict | None:
         if not values:
             return None
@@ -147,13 +159,20 @@ class OutfitService:
             outerwear = self._pick_with_offset(outerwears, item_offset) if outerwears else None
             accessory = self._pick_with_offset(accessories, item_offset) if accessories else None
 
+            top_file_id = self._preferred_file_id(top)
+            bottom_file_id = self._preferred_file_id(bottom)
+            dress_file_id = self._preferred_file_id(dress)
+            outerwear_file_id = self._preferred_file_id(outerwear)
+            shoe_file_id = self._preferred_file_id(shoe)
+            accessory_file_id = self._preferred_file_id(accessory)
+
             items_payload = {
-                "top": [top["telegram_file_id"]] if top else [],
-                "bottom": [bottom["telegram_file_id"]] if bottom else [],
-                "dress": [dress["telegram_file_id"]] if dress else [],
-                "outerwear": [outerwear["telegram_file_id"]] if outerwear else [],
-                "shoes": [shoe["telegram_file_id"]] if shoe else [],
-                "accessories": [accessory["telegram_file_id"]] if accessory else [],
+                "top": [top_file_id] if top_file_id else [],
+                "bottom": [bottom_file_id] if bottom_file_id else [],
+                "dress": [dress_file_id] if dress_file_id else [],
+                "outerwear": [outerwear_file_id] if outerwear_file_id else [],
+                "shoes": [shoe_file_id] if shoe_file_id else [],
+                "accessories": [accessory_file_id] if accessory_file_id else [],
             }
 
             description = (
