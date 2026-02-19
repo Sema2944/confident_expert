@@ -1,0 +1,37 @@
+SYSTEM:
+You are a prompt builder for editorial fashion flat lay generation.
+Your output MUST be a single English text prompt suitable for an image generation model.
+No JSON. No markdown. No extra explanations.
+
+USER:
+Create an image-generation prompt to visualize one full outfit from listed wardrobe items.
+
+Style requirements:
+- Editorial fashion flat lay, premium magazine retouching quality
+- Human-free scene: no person, no face, no body parts
+- No mannequin, no hanger, no ghost mannequin
+- Single coherent frame (NOT a collage)
+- Strict vertical top-to-bottom arrangement: top layer first, lower garments next, shoes at bottom
+- Soft controlled studio lighting with subtle realistic shadows
+- Clean neutral background with no clutter
+- True-to-color garments and realistic fabric texture detail
+- No logos, no text
+
+Outfit components from the user's real wardrobe (do NOT invent items):
+Top: {top_desc}
+Bottom: {bottom_desc}
+Dress: {dress_desc}
+Outerwear: {outerwear_desc}
+Shoes: {shoes_desc}
+Accessories: {accessories_desc}
+
+Rules:
+- Use ONLY the listed components.
+- Keep exact item count: do not add, duplicate, replace, or omit listed non-empty components.
+- NEVER add extra items (including bags, socks, jewelry, props, decor) unless explicitly listed in components.
+- If Dress is present, do not include Top or Bottom.
+- If a component is empty or "none", omit it from the final composition.
+- Keep wording concise and specific (color + garment type).
+- Do not include brands.
+
+Return ONE single-line prompt in English.

@@ -1,0 +1,110 @@
+FILE: services/image_service.py
+
+import base64
+import logging
+
+import httpx
+
+from config.settings import settings
+
+
+class ImageService:
+    _NEGATIVE_PROMPT = (
+        "extra items, extra garments, duplicates, text, logo, watermark, blurry, low-res, "
+        "jpeg artifacts, distorted clothing, warped fabric, collage, split frame"
+    )
+
+    @staticmethod
+    def _prompt_preview(prompt: str, max_len: int = 180) -> str:
+        normalized = " ".join(prompt.split())
+        if len(normalized) <= max_len:
+            return normalized
+        return f"{normalized[:max_len]}..."
+
+    @staticmethod
+    def _size_candidates() -> list[str]:
+        sizes = [settings.image_size]
+        sizes.extend([size.strip() for size in settings.image_fallback_sizes.split(",") if size.strip()])
+
+        deduped: list[str] = []
+        for size in sizes:
+            if size not in deduped:
+                deduped.append(size)
+        return deduped
+
+    async def generate_image(self, outfit_description: str) -> bytes | None:
+        if not settings.image_api_key:
+            logging.warning("IMAGE_API_KEY is empty; image generation is disabled.")
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {settings.image_api_key}",
+            "Content-Type": "application/json",
+        }
+        prompt_preview = self._prompt_preview(outfit_description)
+        sizes = self._size_candidates()
+
+        for index, size in enumerate(sizes):
+            payload = {
+                "model": settings.image_model,
+                "prompt": outfit_description,
+                "size": size,
+            }
+            if settings.image_negative_prompt_supported:
+                payload["negative_prompt"] = self._NEGATIVE_PROMPT
+
+            logging.info(
+                "Generating outfit image (model=%s, size=%s, prompt='%s')",
+                settings.image_model,
+                size,
+                prompt_preview,
+            )
+
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{settings.image_api_base.rstrip('/')}/images/generations",
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                can_retry = error.response.status_code == 400 and index < len(sizes) - 1
+                logging.warning(
+                    "Image generation failed (model=%s, size=%s, status=%s).%s",
+                    settings.image_model,
+                    size,
+                    error.response.status_code,
+                    " Trying fallback size." if can_retry else "",
+                )
+                if can_retry:
+                    continue
+                return None
+            except Exception as error:
+                logging.exception("Image generation request failed: %s", error)
+                return None
+
+            data = response.json().get("data") or []
+            if not data:
+                logging.warning("Image API returned empty data array.")
+                return None
+
+            b64 = data[0].get("b64_json")
+            if b64:
+                return base64.b64decode(b64)
+
+            image_url = data[0].get("url")
+            if image_url:
+                try:
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        image_response = await client.get(image_url)
+                        image_response.raise_for_status()
+                    return image_response.content
+                except Exception as error:
+                    logging.exception("Failed to download generated image by URL: %s", error)
+                    return None
+
+            logging.warning("Image API response has neither b64_json nor url.")
+            return None
+
+        return None

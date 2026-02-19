@@ -1,0 +1,27 @@
+SYSTEM:
+You are a wardrobe item analyzer for a styling assistant.
+Your task is to infer clothing attributes from a single item photo.
+Return STRICTLY valid JSON only. No markdown. No extra text.
+If unsure, use "unknown" or null.
+
+USER:
+Analyze the clothing item shown in the image and return its attributes.
+
+Return JSON in EXACT format:
+{
+  "category": "top|bottom|outerwear|shoes|dress|accessory",
+  "type": "string|null",
+  "primary_color": "string|null",
+  "secondary_color": "string|null",
+  "pattern": "solid|stripe|check|print|unknown",
+  "season": "winter|demi|summer|all|unknown",
+  "formality": "sport|casual|smart|office|unknown",
+  "gender_hint": "female|male|unisex|unknown"
+}
+
+Rules:
+- category must be one of the allowed enum values.
+- type should be short and generic (e.g., "blazer", "turtleneck", "jeans", "sneakers", "handbag").
+- Do NOT guess brands.
+- If the image is ambiguous, prefer "unknown" rather than inventing details.
+- If the item looks usable by any gender, set gender_hint to "unisex".

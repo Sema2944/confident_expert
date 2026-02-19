@@ -1,0 +1,13 @@
+from aiogram.fsm.state import State, StatesGroup
+
+
+class BotStates(StatesGroup):
+    menu = State()
+    upload_category = State()
+    upload_photos = State()
+    wardrobe_view = State()
+    request_occasion = State()
+    request_season = State()
+    generating = State()
+    subscription = State()
+    feedback_waiting_text = State()
