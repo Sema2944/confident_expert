@@ -1,138 +1,138 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
-import re
+import logging
+from pathlib import Path
 
+import httpx
 
-@dataclass(frozen=True)
-class TrendSignal:
-    source_url: str
-    headline: str
+from config.settings import settings
 
 
 class FashionTrendService:
     """Builds a short Russian digest for current fashion trends."""
 
+    _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "fashion_trends.txt"
+
+    _SEASON_LABELS = {
+        "winter": "зима", "demi": "весна/осень", "summer": "лето", "all": "текущий сезон",
+    }
+
     async def get_trend_digest(self, season: str = "all", year: int | None = None) -> str:
         target_year = year or datetime.now().year
-        demo_signals = [
-            "https://www.vogue.com/feed/rss :: New York shows focused on wearable layering and quiet luxury",
-            "https://www.whowhatwear.com/rss :: Street style highlights deep chocolate, burgundy and gray",
-            "https://www.harpersbazaar.com/rss/all.xml :: Модные дома возвращают акцентные аксессуары",
-        ]
-        return self._fallback_trends(season=season, year=target_year, source_signals=demo_signals)
 
-    @classmethod
-    def _fallback_trends(cls, season: str, year: int, source_signals: list[str]) -> str:
-        season_label = season if season and season != "all" else "текущий сезон"
-        lines = [f"Тренды {season_label} {year}:"]
+        # Проверяем кэш
+        cached = await self._get_cached(season, target_year)
+        if cached:
+            return cached
 
-        normalized: list[str] = []
-        for signal in source_signals:
-            localized = cls._localize_signal_for_russian(signal)
-            if localized:
-                normalized.append(f"- {localized}")
+        if not settings.ai_api_key:
+            return self._fallback_trends(season=season, year=target_year)
 
-        if not normalized:
-            normalized = [
-                "- Vogue: носибельная многослойность и тихая роскошь в базе гардероба.",
-                "- Who What Wear: шоколадные и бордовые оттенки + серый как нейтральная база.",
-            ]
+        try:
+            result = await self._call_ai(season=season, year=target_year)
+            if result:
+                await self._save_cache(season, target_year, result)
+                return result
+        except Exception:
+            logging.exception("Fashion trend AI request failed")
 
-        lines.extend(normalized[:5])
-        lines.append(f"Где следить за трендами на русском: {cls._russian_style_sources_for_digest(source_signals)}")
-        lines.append("Совет: берите один заметный акцент (цвет, аксессуар или фактуру) и сочетайте с базовыми вещами.")
-        return "\n".join(lines)
+        return self._fallback_trends(season=season, year=target_year)
 
-    @classmethod
-    def _localize_signal_for_russian(cls, signal: str) -> str:
-        if "::" not in signal:
-            return ""
+    async def _call_ai(self, season: str, year: int) -> str | None:
+        template = self._PROMPT_PATH.read_text(encoding="utf-8")
+        prompt = template.format(
+            source_signals="(нет внешних сигналов — используй свои знания о трендах)",
+            season=self._SEASON_LABELS.get(season, season),
+            year=year,
+        )
 
-        source_url, headline = [part.strip() for part in signal.split("::", maxsplit=1)]
-        if not headline:
-            return ""
-
-        source_name = cls._source_name(source_url)
-        if cls._looks_english(headline):
-            insight = cls._english_headline_hint(source_name)
-            return f"{source_name}: {insight}"
-
-        clarified = cls._clarify_headline(headline)
-        return f"{source_name}: {clarified}"
-
-    @staticmethod
-    def _english_headline_hint(source_name: str) -> str:
-        hints = {
-            "Vogue": "акцент на носибельную многослойность и качественную базу",
-            "Who What Wear": "ставка на трендовые оттенки (шоколад, бордо, серый) и понятные стилизации",
-            "Harper's Bazaar": "выразительные аксессуары снова становятся центром образа",
+        headers = {
+            "Authorization": f"Bearer {settings.ai_api_key}",
+            "Content-Type": "application/json",
         }
-        return hints.get(source_name, "свежий англоязычный разбор сезонных трендов")
+        payload = {
+            "model": settings.ai_model,
+            "temperature": 0.5,
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+        }
 
-    @staticmethod
-    def _clarify_headline(headline: str) -> str:
-        lowered = headline.lower()
-        if "акцент" in lowered and "аксессуар" in lowered:
-            return (
-                "модные дома возвращают акцентные аксессуары: крупные серьги, широкие ремни и заметные сумки "
-                "— они собирают образ и делают базу визуально дороже"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{settings.ai_api_base.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
             )
-        return headline
+            response.raise_for_status()
+
+        choices = response.json().get("choices") or []
+        if not choices:
+            return None
+        return choices[0].get("message", {}).get("content", "").strip() or None
+
+    async def _get_cached(self, season: str, year: int) -> str | None:
+        """Проверяет кэш трендов в SQLite (если таблица существует)."""
+        try:
+            from bot.storage import _connect
+
+            async with await _connect() as connection:
+                cursor = await connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='trend_cache'"
+                )
+                if not await cursor.fetchone():
+                    return None
+
+                cursor = await connection.execute(
+                    """
+                    SELECT digest FROM trend_cache
+                    WHERE season = ? AND year = ?
+                    AND cached_at > datetime('now', '-24 hours')
+                    """,
+                    (season, year),
+                )
+                row = await cursor.fetchone()
+                return row["digest"] if row else None
+        except Exception:
+            return None
+
+    async def _save_cache(self, season: str, year: int, digest: str) -> None:
+        """Сохраняет тренды в кэш."""
+        try:
+            from bot.storage import _connect
+
+            async with await _connect() as connection:
+                await connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS trend_cache (
+                        season TEXT NOT NULL,
+                        year INTEGER NOT NULL,
+                        digest TEXT NOT NULL,
+                        cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (season, year)
+                    )
+                    """
+                )
+                await connection.execute(
+                    """
+                    INSERT OR REPLACE INTO trend_cache (season, year, digest, cached_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (season, year, digest),
+                )
+                await connection.commit()
+        except Exception:
+            logging.exception("Failed to cache trend digest")
 
     @classmethod
-    def _russian_style_sources_for_digest(cls, source_signals: list[str]) -> str:
-        known_sources: list[str] = []
-        for signal in source_signals:
-            source_url = signal.split("::", maxsplit=1)[0].strip()
-            known_sources.append(cls._source_name(source_url))
-
-        references: list[str] = []
-        for source_name in known_sources:
-            references.extend(cls._russian_style_sources(source_name))
-
-        if not references:
-            references = cls._russian_style_sources("Fashion source")
-
-        deduplicated: list[str] = []
-        seen: set[str] = set()
-        for item in references:
-            if item not in seen:
-                seen.add(item)
-                deduplicated.append(item)
-
-        return "; ".join(deduplicated)
-
-    @staticmethod
-    def _russian_style_sources(source_name: str) -> list[str]:
-        source_map = {
-            "Vogue": [
-                "Vogue Россия — https://www.vogue.ru/fashion/trends",
-                "The Blueprint — https://theblueprint.ru/fashion",
-            ],
-            "Who What Wear": [
-                "BURO. — https://www.buro247.ru/fashion",
-                "GRAZIA Россия — https://graziamagazine.ru/fashion",
-            ],
-            "Harper's Bazaar": [
-                "Harper's Bazaar Kazakhstan (рус.) — https://harpersbazaar.kz/category/fashion",
-                "The Blueprint — https://theblueprint.ru/fashion",
-            ],
-        }
-        return source_map.get(source_name, ["The Blueprint — https://theblueprint.ru/fashion"])
-
-    @staticmethod
-    def _source_name(source_url: str) -> str:
-        lowered = source_url.lower()
-        if "vogue" in lowered:
-            return "Vogue"
-        if "whowhatwear" in lowered:
-            return "Who What Wear"
-        if "harpersbazaar" in lowered:
-            return "Harper's Bazaar"
-        return "Fashion source"
-
-    @staticmethod
-    def _looks_english(text: str) -> bool:
-        return re.search(r"[A-Za-z]", text) is not None and re.search(r"[А-Яа-яЁё]", text) is None
+    def _fallback_trends(cls, season: str, year: int) -> str:
+        season_label = cls._SEASON_LABELS.get(season, "текущий сезон")
+        return (
+            f"Тренды {season_label} {year}:\n"
+            "- Vogue: носибельная многослойность и тихая роскошь в базе гардероба.\n"
+            "- Who What Wear: шоколадные и бордовые оттенки + серый как нейтральная база.\n"
+            "- Harper's Bazaar: акцентные аксессуары — крупные серьги, широкие ремни и заметные сумки.\n\n"
+            "Совет: берите один заметный акцент (цвет, аксессуар или фактуру) и сочетайте с базовыми вещами.\n\n"
+            "Где следить за трендами: Vogue Россия, The Blueprint, BURO."
+        )

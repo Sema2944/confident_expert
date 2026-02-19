@@ -6,7 +6,8 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-from bot.main import build_dispatcher  # используем твой build_dispatcher()
+from bot.main import build_dispatcher
+from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
 
@@ -39,6 +40,7 @@ async def on_shutdown(bot: Bot) -> None:
 
 async def main() -> None:
     setup_logging(settings.log_level)
+    await init_storage()
 
     bot = Bot(token=settings.bot_token)
     dp: Dispatcher = build_dispatcher()
