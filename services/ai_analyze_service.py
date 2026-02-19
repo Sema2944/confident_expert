@@ -5,6 +5,7 @@ import logging
 
 import httpx
 
+from config.categories import CATEGORY_LABELS_RU
 from config.settings import settings
 
 
@@ -149,14 +150,6 @@ class AIAnalyzeService:
             gender_hint="unknown",
         )
 
-_CATEGORY_RU = {
-    "top": "верх",
-    "bottom": "низ",
-    "outerwear": "верхняя одежда",
-    "shoes": "обувь",
-    "accessory": "аксессуар",
-    "onepiece": "цельный образ",
-}
 
 _PATTERN_RU = {
     "solid": "однотонная",
@@ -191,5 +184,39 @@ _GENDER_HINT_RU = {
 
 
 def build_russian_item_summary(category: str, analysis: ItemAnalysis) -> str:
-    _ = category, analysis
-    return "Вещь добавлена в гардероб."
+    has_any = any(
+        getattr(analysis, field) not in (None, "unknown")
+        for field in ("type", "primary_color", "pattern", "season", "formality")
+    )
+
+    if not has_any:
+        return (
+            "✅ Вещь добавлена в гардероб.\n\n"
+            "Не удалось автоматически определить атрибуты. "
+            "Это не повлияет на подбор образов, но с атрибутами результат будет точнее."
+        )
+
+    category_label = CATEGORY_LABELS_RU.get(category, category)
+    lines = [f"✅ Добавлено: {category_label}\n", "📋 Что я вижу:"]
+
+    item_type = analysis.type
+    if item_type and item_type != "unknown":
+        lines.append(f"• Тип: {item_type}")
+
+    color = analysis.primary_color
+    if color and color != "unknown":
+        lines.append(f"• Цвет: {color}")
+
+    pattern = analysis.pattern
+    if pattern and pattern != "unknown":
+        lines.append(f"• Принт: {_PATTERN_RU.get(pattern, pattern)}")
+
+    season = analysis.season
+    if season and season != "unknown":
+        lines.append(f"• Сезон: {_SEASON_RU.get(season, season)}")
+
+    formality = analysis.formality
+    if formality and formality != "unknown":
+        lines.append(f"• Стиль: {_FORMALITY_RU.get(formality, formality)}")
+
+    return "\n".join(lines)

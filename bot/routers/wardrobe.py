@@ -23,47 +23,11 @@ from bot.storage import (
     update_processed_file_id,
 )
 from bot.states import BotStates
+from config.categories import CATEGORY_LABELS_RU, normalize_category
 from services.ai_analyze_service import AIAnalyzeService, build_russian_item_summary
+from services.wardrobe_analysis_service import analyze_wardrobe_gaps
 
 router = Router()
-
-CATEGORIES = {
-    "top": "👕 Верх",
-    "bottom": "👖 Низ",
-    "outerwear": "🧥 Верхняя одежда",
-    "shoes": "👟 Обувь",
-    "accessory": "🧢 Аксессуары",
-    "onepiece": "👔 Цельный образ",
-}
-
-CATEGORY_ALIASES = {
-    "верх": "top",
-    "👕 верх": "top",
-    "низ": "bottom",
-    "👖 низ": "bottom",
-    "верхняя одежда": "outerwear",
-    "🧥 верхняя одежда": "outerwear",
-    "обувь": "shoes",
-    "👟 обувь": "shoes",
-    "аксессуар": "accessory",
-    "аксессуары": "accessory",
-    "🧢 аксессуары": "accessory",
-    "платье": "onepiece",
-    "цельный образ": "onepiece",
-    "👔 цельный образ": "onepiece",
-    "top": "top",
-    "bottom": "bottom",
-    "outerwear": "outerwear",
-    "shoes": "shoes",
-    "accessory": "accessory",
-    "dress": "onepiece",
-    "onepiece": "onepiece",
-}
-
-
-def normalize_category(text: str) -> str | None:
-    cleaned = (text or "").strip().lower()
-    return CATEGORY_ALIASES.get(cleaned)
 
 
 def _item_actions_keyboard(item_id: int) -> InlineKeyboardMarkup:
@@ -107,9 +71,28 @@ def _item_title(item: dict[str, str | int | None]) -> str:
     return "вещь без названия"
 
 
+_SEASON_SHORT_RU = {
+    "winter": "зима", "demi": "демисезон", "summer": "лето", "all": "все сезоны",
+}
+_FORMALITY_SHORT_RU = {
+    "sport": "спортивный", "casual": "повседневный", "smart": "smart casual", "office": "офисный",
+}
+
+
 def _build_item_caption(item: dict[str, str | int | None]) -> str:
-    category_name = CATEGORIES.get(str(item.get("category") or ""), str(item.get("category") or ""))
-    return f"{category_name} — {_item_title(item)}"
+    category_name = CATEGORY_LABELS_RU.get(str(item.get("category") or ""), str(item.get("category") or ""))
+    first_line = f"{category_name} — {_item_title(item)}"
+
+    season = _SEASON_SHORT_RU.get(str(item.get("season") or ""))
+    formality = _FORMALITY_SHORT_RU.get(str(item.get("formality") or ""))
+
+    if season and formality:
+        return f"{first_line}\nСезон: {season} • Стиль: {formality}"
+    if season:
+        return f"{first_line}\nСезон: {season}"
+    if formality:
+        return f"{first_line}\nСтиль: {formality}"
+    return first_line
 
 
 def _build_enhanced_image(image_bytes: bytes) -> bytes | None:
@@ -151,15 +134,21 @@ def _build_enhanced_image(image_bytes: bytes) -> bytes | None:
 
 
 async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
-    items = get_items(user_id)
+    items = await get_items(user_id)
     if not items:
         await message.answer("Гардероб пока пуст. Нажмите '📥 Добавить вещь' и добавьте вещи.")
         return
 
-    counts = get_category_counts(user_id)
+    counts = await get_category_counts(user_id)
     lines = ["Ваш гардероб:"]
     for category, count in sorted(counts.items()):
-        lines.append(f"- {CATEGORIES.get(category, category)}: {count}")
+        lines.append(f"- {CATEGORY_LABELS_RU.get(category, category)}: {count}")
+
+    gaps = analyze_wardrobe_gaps(items)
+    if gaps:
+        lines.append("")
+        lines.append(gaps)
+
     await message.answer("\n".join(lines))
 
     for item in items:
@@ -233,7 +222,7 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
     analyzer = AIAnalyzeService()
     analysis = await analyzer.analyze(image_bytes=image_bytes)
 
-    item_id = add_item(
+    item_id = await add_item(
         user_id=message.from_user.id,
         category=category,
         telegram_file_id=file_id,
@@ -251,7 +240,7 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
             analysis.gender_hint,
         ]
     ):
-        update_item_metadata(
+        await update_item_metadata(
             user_id=message.from_user.id,
             item_id=item_id,
             metadata={
@@ -266,16 +255,31 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
         )
 
     await message.answer(build_russian_item_summary(category=category, analysis=analysis))
-    await message.answer(
-        "Отлично. Эта вещь расширяет твои комбинации.\n"
-        "Добавь ещё несколько — и образы станут разнообразнее."
-    )
 
-    items = get_items(message.from_user.id)
-    if len(items) >= 5:
+    items = await get_items(message.from_user.id)
+    categories_present = {item.get("category") for item in items}
+    can_build = (
+        ("top" in categories_present and "bottom" in categories_present)
+        or "onepiece" in categories_present
+    ) and "shoes" in categories_present
+
+    if can_build and len(items) <= 5:
         await message.answer(
-            "Теперь я могу собирать более точные и интересные сочетания."
+            "Уже можно собрать первый образ! Нажми «✨ Собрать образ» или продолжай добавлять вещи.",
         )
+    elif not can_build:
+        missing = []
+        if "shoes" not in categories_present:
+            missing.append("обувь")
+        if "onepiece" not in categories_present:
+            if "top" not in categories_present:
+                missing.append("верх")
+            if "bottom" not in categories_present:
+                missing.append("низ")
+        if missing:
+            await message.answer(
+                f"Для первого образа осталось добавить: {', '.join(missing)}."
+            )
 
     await message.answer(
         "Отправьте следующее фото или нажмите ⬅️ Назад.",
@@ -321,12 +325,12 @@ async def delete_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> No
         return
 
     item_id = int(callback.data.rsplit(":", maxsplit=1)[-1])
-    removed = delete_item_by_id(user_id=callback.from_user.id, item_id=item_id)
+    removed = await delete_item_by_id(user_id=callback.from_user.id, item_id=item_id)
     if not removed:
         await callback.message.answer("Не нашла эту вещь. Обновите гардероб и попробуйте снова.")
         return
     await callback.message.answer("Удалила вещь из гардероба.")
-    items_left = get_items(callback.from_user.id)
+    items_left = await get_items(callback.from_user.id)
     if not items_left:
         await state.set_state(BotStates.menu)
         await callback.message.answer("Гардероб теперь пуст.", reply_markup=menu_keyboard())
@@ -362,7 +366,7 @@ async def enhance_wardrobe_item(callback: CallbackQuery) -> None:
         return
 
     item_id = int(callback.data.rsplit(":", maxsplit=1)[-1])
-    items = get_items(callback.from_user.id)
+    items = await get_items(callback.from_user.id)
     item = next((entry for entry in items if entry["id"] == item_id), None)
     if not item:
         await callback.message.answer("Не нашла эту вещь. Обновите гардероб и попробуйте снова.")
@@ -386,7 +390,7 @@ async def enhance_wardrobe_item(callback: CallbackQuery) -> None:
         caption="Готово! Сохранила улучшенную версию фото.",
     )
     if sent.photo:
-        update_processed_file_id(
+        await update_processed_file_id(
             user_id=callback.from_user.id,
             item_id=item_id,
             file_id=sent.photo[-1].file_id,
@@ -415,7 +419,7 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
         await message.answer("Введите текстовое название вещи.")
         return
 
-    updated = update_display_name(
+    updated = await update_display_name(
         user_id=message.from_user.id,
         item_id=int(item_id),
         display_name=message.text,

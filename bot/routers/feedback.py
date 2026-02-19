@@ -28,7 +28,7 @@ async def save_feedback(message: Message, state: FSMContext) -> None:
         await message.answer("Нужен текст. Напишите отзыв одним сообщением.")
         return
 
-    add_feedback(
+    await add_feedback(
         user_id=message.from_user.id,
         text=message.text,
         contact=message.from_user.username,

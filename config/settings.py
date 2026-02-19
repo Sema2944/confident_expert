@@ -3,8 +3,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     bot_token: str
-    db_url: str
-    payment_provider_token: str | None = None
     ai_api_key: str | None = None
     ai_api_base: str = "https://api.openai.com/v1"
     ai_model: str = "gpt-4.1-mini"

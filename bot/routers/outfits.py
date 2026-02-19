@@ -5,8 +5,9 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
-from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard
-from bot.storage import get_items
+from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard, season_keyboard
+from bot.storage import get_items, log_outfit_feedback
+from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
 from bot.states import BotStates
 from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
@@ -54,12 +55,14 @@ def _collect_outfit_file_ids(items_payload: dict[str, list[str]]) -> list[str]:
 async def _remember_outfit(
     state: FSMContext,
     items_payload: dict[str, list[str]],
+    items_details: dict[str, dict],
     occasion_code: str,
     season: str,
     image_prompt: str | None,
 ) -> None:
     await state.update_data(
         last_outfit_items_payload=items_payload,
+        last_outfit_items_details=items_details,
         last_occasion_code=occasion_code,
         last_season=season,
         last_image_prompt=image_prompt,
@@ -78,12 +81,41 @@ async def _generate_and_show_outfit(
     season: str = "all",
     count: int = 1,
 ) -> None:
-    items = get_items(message.from_user.id)
+    # Trial gating
+    await get_or_create_user(message.from_user.id, message.from_user.username)
+    allowed, reason = await can_generate_outfit(message.from_user.id)
+    if not allowed:
+        await message.answer(reason, reply_markup=menu_keyboard())
+        await state.set_state(BotStates.menu)
+        return
+
+    items = await get_items(message.from_user.id)
     if not items:
         await message.answer(
-            "Пока в гардеробе мало вещей.\n\n"
-            "Добавь хотя бы 3–5 позиций, и я смогу собрать гармоничный образ.\n"
-            "Начнём?",
+            "Гардероб пуст. Добавь верх, низ и обувь — и я соберу первый образ.",
+            reply_markup=menu_keyboard(),
+        )
+        await state.set_state(BotStates.menu)
+        return
+
+    categories_present = {item.get("category") for item in items}
+    has_full_outfit = (
+        ("top" in categories_present and "bottom" in categories_present)
+        or "onepiece" in categories_present
+    ) and "shoes" in categories_present
+
+    if not has_full_outfit:
+        missing = []
+        if "shoes" not in categories_present:
+            missing.append("обувь")
+        if "onepiece" not in categories_present:
+            if "top" not in categories_present:
+                missing.append("верх")
+            if "bottom" not in categories_present:
+                missing.append("низ")
+        await message.answer(
+            f"Для образа не хватает: {', '.join(missing)}.\n"
+            "Добавь — и я сразу соберу первый вариант.",
             reply_markup=menu_keyboard(),
         )
         await state.set_state(BotStates.menu)
@@ -128,9 +160,12 @@ async def _generate_and_show_outfit(
                 await message.answer_photo(photo=file_id)
 
         shown_count += 1
+        # Собираем детали вещей для «Почему так»
+        items_details = _extract_items_details(items, outfit.items)
         await _remember_outfit(
             state=state,
             items_payload=outfit.items,
+            items_details=items_details,
             occasion_code=occasion_code,
             season=season,
             image_prompt=outfit.image_prompt,
@@ -138,34 +173,84 @@ async def _generate_and_show_outfit(
         await _log_outfit_event("outfit_shown", message, occasion=occasion_code, season=season)
         await _send_outfit_reaction_prompt(message)
 
-    if shown_count > 0 and random.random() < 0.3:
-        await message.answer(random.choice(COMPLIMENTS))
+    if shown_count > 0:
+        await increment_outfit_count(message.from_user.id)
+        if random.random() < 0.3:
+            await message.answer(random.choice(COMPLIMENTS))
 
 
-def _build_why_text(items_payload: dict[str, list[str]]) -> str:
-    has_dress = bool(items_payload.get("dress"))
-    has_outerwear = bool(items_payload.get("outerwear"))
-    has_accessories = bool(items_payload.get("accessories"))
+_NEUTRAL_COLORS = {
+    "black", "white", "gray", "grey", "navy", "beige", "brown", "cream",
+    "чёрный", "белый", "серый", "бежевый", "тёмно-синий", "коричневый",
+}
 
-    if has_dress:
-        sentences = [
-            "Платье здесь работает как главный акцент, поэтому образ сразу выглядит цельным.",
-            "Обувь поддерживает настроение комплекта и не спорит с основным силуэтом.",
-            "Такой набор легко считывается и выглядит аккуратно в движении.",
-        ]
-    else:
-        sentences = [
-            "Верх и низ сбалансированы по роли: один элемент задаёт характер, второй удерживает образ в рамках.",
-            "Обувь поддерживает общий ритм и связывает комплект в единую линию.",
-            "За счёт этого образ выглядит собранно и уместно для выбранного повода.",
-        ]
 
-    if has_outerwear:
-        sentences.append("Верхняя одежда добавляет глубину и делает комплект завершённым по слоям.")
-    elif has_accessories:
-        sentences.append("Аксессуары дают небольшой акцент и добавляют выразительность без перегруза.")
+def _extract_items_details(
+    all_items: list[dict],
+    items_payload: dict[str, list[str]],
+) -> dict[str, dict]:
+    """Извлекает атрибуты вещей из образа для объяснения."""
+    # file_id → item dict
+    fid_to_item: dict[str, dict] = {}
+    for item in all_items:
+        for fid_key in ("processed_file_id", "telegram_file_id"):
+            fid = item.get(fid_key)
+            if isinstance(fid, str) and fid.strip():
+                fid_to_item[fid] = item
 
-    return " ".join(sentences[:4])
+    details: dict[str, dict] = {}
+    for category, file_ids in items_payload.items():
+        for fid in file_ids:
+            item = fid_to_item.get(fid)
+            if item:
+                details[category] = {
+                    "type": item.get("type"),
+                    "primary_color": item.get("primary_color"),
+                    "season": item.get("season"),
+                    "formality": item.get("formality"),
+                }
+                break
+    return details
+
+
+def _build_why_text(
+    items_details: dict[str, dict],
+    occasion_code: str,
+) -> str:
+    """Строит объяснение на основе реальных атрибутов вещей."""
+    parts = []
+    occasion_label = OCCASION_TITLES.get(occasion_code, "образ")
+    parts.append(f"Вот почему этот {occasion_label.lower()} работает:")
+
+    # Анализ цветовой палитры
+    colors = []
+    for details in items_details.values():
+        color = (details.get("primary_color") or "").strip()
+        if color and color != "unknown":
+            colors.append(color)
+
+    neutral = [c for c in colors if c.lower() in _NEUTRAL_COLORS]
+    accent = [c for c in colors if c.lower() not in _NEUTRAL_COLORS]
+
+    if neutral and accent:
+        parts.append(
+            f"Нейтральная база ({', '.join(set(neutral))}) + акцент ({', '.join(set(accent))}) "
+            "— классическое сочетание, которое всегда читается."
+        )
+    elif neutral and not accent:
+        parts.append(f"Монохромная палитра ({', '.join(set(neutral))}) — собранный и уверенный образ.")
+    elif accent:
+        parts.append(f"Акцентные цвета ({', '.join(set(accent))}) задают настроение.")
+
+    # Анализ по occasion
+    if occasion_code == "work_office":
+        parts.append("Для офиса важна аккуратность силуэта и сдержанность — этот набор не перетягивает внимание.")
+    elif occasion_code == "going_out":
+        parts.append("Для выхода важно выглядеть выразительно, но не перегружено — здесь это соблюдено.")
+    elif occasion_code == "sport_travel":
+        parts.append("Для прогулки нужен комфорт и свобода движений — эти вещи позволяют чувствовать себя легко.")
+
+    return "\n\n".join(parts)
 
 
 @router.callback_query(F.data == "outfit:like")
@@ -179,6 +264,13 @@ async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         if callback.message:
+            await log_outfit_feedback(
+                user_id=callback.from_user.id,
+                occasion=data.get("last_occasion_code", ""),
+                season=data.get("last_season", ""),
+                action="like",
+                items=data["last_outfit_items_payload"],
+            )
             await callback.message.answer("Отлично. Я буду учитывать это при следующих подборках.", reply_markup=menu_keyboard())
             await _log_outfit_event("outfit_like", callback.message)
     except Exception:
@@ -190,14 +282,18 @@ async def why_outfit(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     try:
         data = await state.get_data()
-        items_payload = data.get("last_outfit_items_payload")
-        if not items_payload:
+        items_details = data.get("last_outfit_items_details")
+        occasion_code = data.get("last_occasion_code", "casual")
+        if not items_details:
             if callback.message:
                 await callback.message.answer("Не вижу последний образ…")
             return
 
         if callback.message:
-            await callback.message.answer(_build_why_text(items_payload), reply_markup=outfit_reaction_keyboard())
+            await callback.message.answer(
+                _build_why_text(items_details, occasion_code),
+                reply_markup=outfit_reaction_keyboard(),
+            )
             await _log_outfit_event("outfit_why", callback.message)
     except Exception:
         logging.exception("Failed to handle outfit why callback")
@@ -217,13 +313,21 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 await callback.message.answer("Не вижу последний образ…")
             return
 
+        await log_outfit_feedback(
+            user_id=callback.from_user.id,
+            occasion=occasion_code,
+            season=season,
+            action="reroll",
+            items=last_items,
+        )
+
         if not callback.message:
             return
 
         await callback.message.answer("Собираю альтернативный вариант…")
         await _log_outfit_event("outfit_reroll", callback.message, occasion=occasion_code, season=season)
 
-        items = get_items(callback.from_user.id)
+        items = await get_items(callback.from_user.id)
         if not items:
             await callback.message.answer(
                 "Пока в гардеробе мало вещей. Добавь ещё вещи, и я соберу альтернативу.",
@@ -272,9 +376,11 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             for file_id in outfit_file_ids:
                 await callback.message.answer_photo(photo=file_id)
 
+        reroll_details = _extract_items_details(items, new_outfit.items)
         await _remember_outfit(
             state,
             new_outfit.items,
+            items_details=reroll_details,
             occasion_code=occasion_code,
             season=season,
             image_prompt=new_outfit.image_prompt,
@@ -339,6 +445,13 @@ async def outfit_today(message: Message, state: FSMContext) -> None:
     )
 
 
+SEASONS = {
+    "❄️ Зима": "winter",
+    "🍂 Весна/осень": "demi",
+    "☀️ Лето": "summer",
+}
+
+
 @router.message(BotStates.request_occasion, F.text)
 async def set_occasion(message: Message, state: FSMContext) -> None:
     if message.text == "⬅️ Назад":
@@ -351,10 +464,30 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
         await message.answer("Не понял повод. Выберите кнопку.")
         return
     await state.update_data(occasion=occasion)
+    await state.set_state(BotStates.request_season)
+    await message.answer("Какой сезон?", reply_markup=season_keyboard())
+
+
+@router.message(BotStates.request_season, F.text)
+async def set_season(message: Message, state: FSMContext) -> None:
+    if message.text == "⬅️ Назад":
+        await state.set_state(BotStates.request_occasion)
+        await message.answer("Куда идёшь?", reply_markup=occasion_keyboard())
+        return
+
+    season = SEASONS.get(message.text)
+    if not season:
+        await message.answer("Выбери сезон кнопкой.")
+        return
+
+    data = await state.get_data()
+    occasion = data.get("occasion", "casual")
+
+    await message.answer("Подбираю образ…")
     await _generate_and_show_outfit(
         message=message,
         state=state,
         occasion_code=occasion,
-        season="all",
+        season=season,
         count=1,
     )

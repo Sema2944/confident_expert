@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 
 from bot.routers import feedback, menu, outfits, subscription, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
+from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
 
@@ -33,6 +34,7 @@ def _log_router_overview(dispatcher: Dispatcher) -> None:
 
 async def main() -> None:
     setup_logging(settings.log_level)
+    await init_storage()
     bot = Bot(token=settings.bot_token)
     dispatcher = build_dispatcher()
     _log_router_overview(dispatcher)
