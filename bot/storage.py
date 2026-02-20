@@ -5,15 +5,17 @@ import os
 from pathlib import Path
 
 import aiosqlite
+from contextlib import asynccontextmanager
 
 _STORAGE_PATH = Path(os.getenv("WARDROBE_STORAGE_PATH", Path(__file__).resolve().parents[1] / "data" / "wardrobe.sqlite3"))
 _STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _connect() -> aiosqlite.Connection:
-    connection = aiosqlite.connect(_STORAGE_PATH)
-    connection.row_factory = aiosqlite.Row
-    return connection
+@asynccontextmanager
+async def _connect():
+    async with aiosqlite.connect(_STORAGE_PATH) as connection:
+        connection.row_factory = aiosqlite.Row
+        yield connection
 
 
 async def init_storage() -> None:
