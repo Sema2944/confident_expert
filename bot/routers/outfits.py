@@ -173,6 +173,8 @@ async def _generate_and_show_outfit(
         await _log_outfit_event("outfit_shown", message, occasion=occasion_code, season=season)
         await _send_outfit_reaction_prompt(message)
 
+    await state.set_state(BotStates.menu)
+
     if shown_count > 0:
         await increment_outfit_count(message.from_user.id)
         if random.random() < 0.3:
@@ -336,18 +338,31 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         new_outfit: OutfitResult | None = None
+        generation_error = False
         for _ in range(3):
-            candidates = await outfit_service.generate_outfits(
-                items=items,
-                occasion=occasion_code,
-                season=season,
-                count=1,
-            )
+            try:
+                candidates = await outfit_service.generate_outfits(
+                    items=items,
+                    occasion=occasion_code,
+                    season=season,
+                    count=1,
+                )
+            except Exception:
+                logging.exception("Reroll generation failed")
+                generation_error = True
+                break
             if not candidates:
                 break
             if candidates[0].items != last_items:
                 new_outfit = candidates[0]
                 break
+
+        if generation_error:
+            await callback.message.answer(
+                "Ошибка при подборе. Попробуй позже.",
+                reply_markup=menu_keyboard(),
+            )
+            return
 
         if new_outfit is None:
             await callback.message.answer(

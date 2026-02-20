@@ -103,21 +103,25 @@ async def send_scheduled_post(bot: Bot, post: dict) -> None:
 
 async def scheduler_loop(bot: Bot) -> None:
     logging.info("Scheduler loop started")
-    while True:
-        try:
-            due_posts = await get_due_posts()
-            for post in due_posts:
-                try:
-                    await send_scheduled_post(bot, post)
-                    await mark_post_sent(post["id"])
-                    logging.info("Scheduled post %s sent to %s", post["id"], post["channel_id"])
-                except Exception as exc:
-                    await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
-                    logging.exception("Failed to send scheduled post %s", post["id"])
-        except Exception:
-            logging.exception("Scheduler loop iteration failed")
+    try:
+        while True:
+            try:
+                due_posts = await get_due_posts()
+                for post in due_posts:
+                    try:
+                        await send_scheduled_post(bot, post)
+                        await mark_post_sent(post["id"])
+                        logging.info("Scheduled post %s sent to %s", post["id"], post["channel_id"])
+                    except Exception as exc:
+                        await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
+                        logging.exception("Failed to send scheduled post %s", post["id"])
+            except Exception:
+                logging.exception("Scheduler loop iteration failed")
 
-        await asyncio.sleep(60)
+            await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        logging.info("Scheduler loop stopped")
+        raise
 
 
 # ─── Seed Data ─────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 
 from aiogram import F, Router
@@ -217,7 +218,9 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
         await message.bot.download(telegram_file, destination=image_stream)
         image_bytes = image_stream.getvalue()
     except Exception:
-        image_bytes = b""
+        logging.exception("Failed to download photo from Telegram")
+        await message.answer("❌ Не удалось загрузить фото. Попробуй ещё раз.")
+        return
 
     analyzer = AIAnalyzeService()
     analysis = await analyzer.analyze(image_bytes=image_bytes)
