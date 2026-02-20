@@ -126,6 +126,7 @@ async def _generate_and_show_outfit(
         occasion=occasion_code,
         season=season,
         count=count,
+        user_id=message.from_user.id,
     )
 
     if not outfits:
@@ -346,6 +347,7 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                     occasion=occasion_code,
                     season=season,
                     count=1,
+                    user_id=callback.from_user.id,
                 )
             except Exception:
                 logging.exception("Reroll generation failed")

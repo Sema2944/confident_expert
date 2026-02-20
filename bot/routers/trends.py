@@ -14,7 +14,7 @@ async def cmd_trends(message: Message) -> None:
     await send_trends(message)
 
 
-@router.message(F.text.in_({"🎨 Модные тренды", "Тренды", "Мода", "Цвета сезона"}))
+@router.message(F.text.in_({"🎨 Модные тренды", "🎨 Тренды", "Тренды", "Мода", "Цвета сезона"}))
 async def trends_from_menu(message: Message) -> None:
     await send_trends(message)
 

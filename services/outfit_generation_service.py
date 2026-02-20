@@ -120,6 +120,17 @@ def _filter_items_for_context(
     return filtered
 
 
+def _apply_liked_boost(grouped: dict[str, list[dict]], liked_file_ids: set[str]) -> None:
+    """Перемещает лайкнутые вещи в начало списка каждой категории."""
+    if not liked_file_ids:
+        return
+    for category, items_list in grouped.items():
+        liked = [i for i in items_list if i.get("telegram_file_id") in liked_file_ids
+                 or i.get("processed_file_id") in liked_file_ids]
+        others = [i for i in items_list if i not in liked]
+        grouped[category] = liked + others
+
+
 class OutfitService:
     _IMAGE_PROMPT_TEMPLATE = Path(__file__).resolve().parents[1] / "prompts" / "image_generation.txt"
 
@@ -356,6 +367,7 @@ class OutfitService:
         occasion: str,
         season: str,
         count: int,
+        liked_file_ids: set[str] | None = None,
     ) -> list[OutfitResult]:
         """Локальная генерация образов (без AI)."""
         filtered = _filter_items_for_context(items, occasion, season)
@@ -366,6 +378,9 @@ class OutfitService:
             if not category:
                 continue
             grouped.setdefault(category, []).append(item)
+
+        if liked_file_ids:
+            _apply_liked_boost(grouped, liked_file_ids)
 
         if not grouped.get("shoes"):
             return []
@@ -401,7 +416,17 @@ class OutfitService:
         occasion: str,
         season: str,
         count: int,
+        user_id: int | None = None,
     ) -> list[OutfitResult]:
+        # Получаем лайкнутые вещи для бустинга
+        liked_file_ids: set[str] = set()
+        if user_id:
+            try:
+                from bot.storage import get_liked_items
+                liked_file_ids = set(await get_liked_items(user_id))
+            except Exception:
+                pass
+
         if settings.ai_api_key:
             try:
                 filtered = _filter_items_for_context(items, occasion, season)
@@ -409,4 +434,4 @@ class OutfitService:
             except Exception:
                 logging.exception("AI outfit generation failed, using local fallback")
 
-        return await self._generate_outfits_local(items, occasion, season, count)
+        return await self._generate_outfits_local(items, occasion, season, count, liked_file_ids=liked_file_ids)
