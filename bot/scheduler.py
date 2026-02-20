@@ -185,6 +185,8 @@ WEEK1_POSTS = [
             "Сейчас допиливаем подбор по поводу и сезону.\n"
             "Скоро покажу, как это выглядит внутри.\n"
             "\n"
+            "Подробнее: sema2944.github.io/shkaf-rabotaet\n"
+            "\n"
             "Кто хочет попробовать первым — ставьте 🔥"
         ),
     },
@@ -255,6 +257,8 @@ WEEK1_POSTS = [
             "\n"
             "Первые 50 пользователей — бесплатный месяц.\n"
             "\n"
+            "Всё о боте: sema2944.github.io/shkaf-rabotaet\n"
+            "\n"
             "Хочешь в список? Напиши «+» в комментариях."
         ),
     },
@@ -263,13 +267,30 @@ WEEK1_POSTS = [
 
 async def seed_week1_posts() -> int:
     async with _connect() as conn:
-        inserted = 0
+        changed = 0
         for post in WEEK1_POSTS:
             cursor = await conn.execute(
-                "SELECT id FROM scheduled_posts WHERE scheduled_at = ?",
+                "SELECT id, status FROM scheduled_posts WHERE scheduled_at = ?",
                 (post["scheduled_at"],),
             )
-            if await cursor.fetchone():
+            existing = await cursor.fetchone()
+
+            if existing:
+                if existing["status"] == "pending":
+                    await conn.execute(
+                        """
+                        UPDATE scheduled_posts
+                        SET text_content = ?, poll_question = ?, poll_options_json = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            post.get("text_content"),
+                            post.get("poll_question"),
+                            post.get("poll_options_json"),
+                            existing["id"],
+                        ),
+                    )
+                    changed += 1
                 continue
 
             await conn.execute(
@@ -288,8 +309,8 @@ async def seed_week1_posts() -> int:
                     CHANNEL_ID,
                 ),
             )
-            inserted += 1
+            changed += 1
 
         await conn.commit()
-    logging.info("Seeded %d scheduled posts (Week 1)", inserted)
-    return inserted
+    logging.info("Seeded/updated %d scheduled posts (Week 1)", changed)
+    return changed
