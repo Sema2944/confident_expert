@@ -8,7 +8,7 @@ FREE_OUTFIT_LIMIT = 3
 
 
 async def get_or_create_user(user_id: int, username: str | None = None) -> dict:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,),
         )
@@ -68,7 +68,7 @@ async def can_generate_outfit(user_id: int) -> tuple[bool, str]:
 
 
 async def increment_outfit_count(user_id: int) -> None:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         await connection.execute(
             """
             UPDATE user_profiles
@@ -83,7 +83,7 @@ async def increment_outfit_count(user_id: int) -> None:
 async def activate_subscription(user_id: int, days: int) -> None:
     from datetime import timedelta
     until = datetime.now() + timedelta(days=days)
-    async with await _connect() as connection:
+    async with _connect() as connection:
         await connection.execute(
             """
             UPDATE user_profiles

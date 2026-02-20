@@ -10,14 +10,14 @@ _STORAGE_PATH = Path(os.getenv("WARDROBE_STORAGE_PATH", Path(__file__).resolve()
 _STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-async def _connect() -> aiosqlite.Connection:
-    connection = await aiosqlite.connect(_STORAGE_PATH)
+def _connect() -> aiosqlite.Connection:
+    connection = aiosqlite.connect(_STORAGE_PATH)
     connection.row_factory = aiosqlite.Row
     return connection
 
 
 async def init_storage() -> None:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         await connection.execute(
             """
             CREATE TABLE IF NOT EXISTS wardrobe_items (
@@ -82,7 +82,7 @@ async def log_outfit_feedback(
     user_id: int, occasion: str, season: str, action: str, items: dict,
 ) -> None:
     import json as _json
-    async with await _connect() as connection:
+    async with _connect() as connection:
         await connection.execute(
             """
             INSERT INTO outfit_feedback (user_id, occasion, season, action, items_json)
@@ -96,7 +96,7 @@ async def log_outfit_feedback(
 async def get_liked_items(user_id: int) -> list[str]:
     """Возвращает file_id вещей из liked-образов."""
     import json as _json
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT items_json FROM outfit_feedback
@@ -141,7 +141,7 @@ async def add_item(
         "gender_hint": gender_hint or "unknown",
     }
 
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             INSERT INTO wardrobe_items (
@@ -186,7 +186,7 @@ def _build_item_payload(row: aiosqlite.Row) -> dict[str, str | int | None]:
 
 
 async def get_items(user_id: int) -> list[dict[str, str | int | None]]:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
@@ -202,7 +202,7 @@ async def get_items(user_id: int) -> list[dict[str, str | int | None]]:
 
 
 async def delete_item_by_id(user_id: int, item_id: int) -> dict[str, str | int | None] | None:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
@@ -227,7 +227,7 @@ async def delete_item(user_id: int, item_index: int) -> dict[str, str | int | No
     if item_index < 0:
         return None
 
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT id
@@ -247,7 +247,7 @@ async def delete_item(user_id: int, item_index: int) -> dict[str, str | int | No
 
 
 async def update_processed_file_id(user_id: int, item_id: int, file_id: str) -> bool:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             UPDATE wardrobe_items
@@ -261,7 +261,7 @@ async def update_processed_file_id(user_id: int, item_id: int, file_id: str) -> 
 
 
 async def update_display_name(user_id: int, item_id: int, display_name: str) -> bool:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             UPDATE wardrobe_items
@@ -275,7 +275,7 @@ async def update_display_name(user_id: int, item_id: int, display_name: str) -> 
 
 
 async def update_item_metadata(user_id: int, item_id: int, metadata: dict[str, str]) -> bool:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT metadata_json
@@ -303,7 +303,7 @@ async def update_item_metadata(user_id: int, item_id: int, metadata: dict[str, s
 
 
 async def get_category_counts(user_id: int) -> dict[str, int]:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             SELECT category, COUNT(*) AS cnt
@@ -318,7 +318,7 @@ async def get_category_counts(user_id: int) -> dict[str, int]:
 
 
 async def add_feedback(user_id: int, text: str, contact: str | None = None) -> int:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         cursor = await connection.execute(
             """
             INSERT INTO feedback_messages (user_id, text, contact)
@@ -331,6 +331,6 @@ async def add_feedback(user_id: int, text: str, contact: str | None = None) -> i
 
 
 async def clear_user_items(user_id: int) -> None:
-    async with await _connect() as connection:
+    async with _connect() as connection:
         await connection.execute("DELETE FROM wardrobe_items WHERE user_id = ?", (user_id,))
         await connection.commit()

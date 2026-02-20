@@ -77,7 +77,7 @@ class FashionTrendService:
         try:
             from bot.storage import _connect
 
-            async with await _connect() as connection:
+            async with _connect() as connection:
                 cursor = await connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='trend_cache'"
                 )
@@ -102,7 +102,7 @@ class FashionTrendService:
         try:
             from bot.storage import _connect
 
-            async with await _connect() as connection:
+            async with _connect() as connection:
                 await connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS trend_cache (

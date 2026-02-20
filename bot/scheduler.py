@@ -17,7 +17,7 @@ CHANNEL_ID = "@shkaf_rabotaet"
 
 
 async def init_scheduled_posts_table() -> None:
-    async with await _connect() as conn:
+    async with _connect() as conn:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scheduled_posts (
@@ -46,7 +46,7 @@ async def init_scheduled_posts_table() -> None:
 
 async def get_due_posts() -> list[dict]:
     now_utc = datetime.now(timezone.utc).isoformat()
-    async with await _connect() as conn:
+    async with _connect() as conn:
         cursor = await conn.execute(
             """
             SELECT id, scheduled_at, post_type, text_content,
@@ -63,7 +63,7 @@ async def get_due_posts() -> list[dict]:
 
 async def mark_post_sent(post_id: int) -> None:
     now_utc = datetime.now(timezone.utc).isoformat()
-    async with await _connect() as conn:
+    async with _connect() as conn:
         await conn.execute(
             "UPDATE scheduled_posts SET status = 'sent', sent_at = ? WHERE id = ?",
             (now_utc, post_id),
@@ -72,7 +72,7 @@ async def mark_post_sent(post_id: int) -> None:
 
 
 async def mark_post_failed(post_id: int, error: str) -> None:
-    async with await _connect() as conn:
+    async with _connect() as conn:
         await conn.execute(
             "UPDATE scheduled_posts SET status = 'failed', error_message = ? WHERE id = ?",
             (error, post_id),
@@ -262,7 +262,7 @@ WEEK1_POSTS = [
 
 
 async def seed_week1_posts() -> int:
-    async with await _connect() as conn:
+    async with _connect() as conn:
         inserted = 0
         for post in WEEK1_POSTS:
             cursor = await conn.execute(
