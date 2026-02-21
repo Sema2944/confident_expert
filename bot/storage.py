@@ -40,6 +40,8 @@ async def init_storage() -> None:
             await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN processed_file_id TEXT")
         if "display_name" not in columns:
             await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN display_name TEXT")
+        if "price" not in columns:
+            await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN price INTEGER DEFAULT 0")
         await connection.execute(
             """
             CREATE TABLE IF NOT EXISTS feedback_messages (
@@ -132,6 +134,7 @@ async def add_item(
     gender_hint: str | None = None,
     processed_file_id: str | None = None,
     display_name: str | None = None,
+    price: int = 0,
 ) -> int:
     metadata = {
         "type": item_type or "unknown",
@@ -152,9 +155,10 @@ async def add_item(
                 telegram_file_id,
                 processed_file_id,
                 display_name,
-                metadata_json
+                metadata_json,
+                price
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -163,6 +167,7 @@ async def add_item(
                 processed_file_id,
                 display_name,
                 json.dumps(metadata, ensure_ascii=False),
+                price,
             ),
         )
         await connection.commit()
@@ -330,6 +335,50 @@ async def add_feedback(user_id: int, text: str, contact: str | None = None) -> i
         )
         await connection.commit()
         return int(cursor.lastrowid)
+
+
+async def get_wardrobe_stats(user_id: int) -> dict:
+    async with _connect() as connection:
+        row = await (await connection.execute(
+            "SELECT COUNT(*) as total, SUM(price) as total_value FROM wardrobe_items WHERE user_id = ?",
+            (user_id,),
+        )).fetchone()
+        total_items = row["total"] or 0
+        total_value = row["total_value"] or 0
+
+        cats = await (await connection.execute(
+            "SELECT category, COUNT(*) as cnt, SUM(price) as val FROM wardrobe_items WHERE user_id = ? GROUP BY category",
+            (user_id,),
+        )).fetchall()
+        categories = {r["category"]: {"count": r["cnt"], "value": r["val"] or 0} for r in cats}
+
+        expensive = await (await connection.execute(
+            "SELECT display_name, price FROM wardrobe_items WHERE user_id = ? AND price > 0 ORDER BY price DESC LIMIT 1",
+            (user_id,),
+        )).fetchone()
+
+        no_price = await (await connection.execute(
+            "SELECT COUNT(*) as cnt FROM wardrobe_items WHERE user_id = ? AND (price IS NULL OR price = 0)",
+            (user_id,),
+        )).fetchone()
+
+    return {
+        "total_items": total_items,
+        "total_value": total_value,
+        "categories": categories,
+        "most_expensive": dict(expensive) if expensive else None,
+        "no_price_count": no_price["cnt"],
+    }
+
+
+async def update_item_price(user_id: int, item_id: int, price: int) -> bool:
+    async with _connect() as connection:
+        cursor = await connection.execute(
+            "UPDATE wardrobe_items SET price = ? WHERE id = ? AND user_id = ?",
+            (price, item_id, user_id),
+        )
+        await connection.commit()
+    return cursor.rowcount > 0
 
 
 async def clear_user_items(user_id: int) -> None:

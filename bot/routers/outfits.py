@@ -12,6 +12,7 @@ from bot.states import BotStates
 from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
 from services.outfit_service import OutfitImageService
+from services.outfit_visualization_service import describe_items_for_mannequin, generate_mannequin_image
 
 router = Router()
 outfit_service = OutfitService()
@@ -416,49 +417,61 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         data = await state.get_data()
-        image_prompt = data.get("last_image_prompt")
-        if not image_prompt:
-            await callback.message.answer("Не вижу описание последнего образа для визуализации.")
+        items_payload = data.get("last_outfit_items_payload")
+        if not items_payload:
+            await callback.message.answer("Не вижу последний образ для визуализации.")
             return
 
-        generated = await image_service.generate_image(image_prompt)
-        if not generated:
+        await callback.message.answer("Готовлю визуализацию на манекене… Это займёт 15–30 секунд.")
+
+        description = await describe_items_for_mannequin(callback.message.bot, items_payload)
+        if not description:
+            # Fallback на старый метод
+            image_prompt = data.get("last_image_prompt")
+            if image_prompt:
+                generated = await image_service.generate_image(image_prompt)
+                if generated:
+                    await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
+                    await callback.message.answer_photo(
+                        photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
+                    )
+                    await _log_outfit_event("outfit_visualize", callback.message)
+                    return
             await callback.message.answer("Не удалось подготовить визуализацию. Попробуйте чуть позже.")
             return
 
-        await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
+        mannequin_image = await generate_mannequin_image(description)
+        if not mannequin_image:
+            # Fallback на старый метод
+            image_prompt = data.get("last_image_prompt")
+            if image_prompt:
+                generated = await image_service.generate_image(image_prompt)
+                if generated:
+                    await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
+                    await callback.message.answer_photo(
+                        photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
+                    )
+                    await _log_outfit_event("outfit_visualize", callback.message)
+                    return
+            await callback.message.answer("Не удалось подготовить визуализацию. Попробуйте чуть позже.")
+            return
+
         await callback.message.answer_photo(
-            photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
+            photo=BufferedInputFile(mannequin_image, filename="mannequin_outfit.png"),
+            caption="✨ Твой образ на манекене — фронт и профиль",
         )
         await _log_outfit_event("outfit_visualize", callback.message)
     except Exception:
         logging.exception("Failed to handle outfit visualize callback")
 
 
-@router.message(F.text == "👗 Собрать образы")
+@router.message(F.text.in_({"✨ Собрать образ", "👗 Собрать образы", "Образы"}))
 async def request_outfit(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.request_occasion)
     await message.answer(
         "Куда ты сегодня идёшь?\n"
         "Я подберу вариант, который будет уместным и уверенным.",
         reply_markup=occasion_keyboard(),
-    )
-
-
-@router.message(F.text.in_({"✨ Собрать образ", "Образы", "✨ Образы", "👗 Собрать образы"}))
-async def request_outfit_short(message: Message, state: FSMContext) -> None:
-    await request_outfit(message, state)
-
-
-@router.message(F.text == "🔥 Сегодня")
-async def outfit_today(message: Message, state: FSMContext) -> None:
-    await message.answer("Секунду. Подбираю вариант на сегодня…")
-    await _generate_and_show_outfit(
-        message=message,
-        state=state,
-        occasion_code="casual",
-        season="all",
-        count=1,
     )
 
 

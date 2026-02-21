@@ -11,6 +11,8 @@ from bot.scheduler import init_scheduled_posts_table, scheduler_loop, seed_week1
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
+from services.payment_service import init_yookassa, parse_webhook
+from services.subscription_service import activate_subscription
 
 
 async def on_startup(bot: Bot) -> None:
@@ -45,6 +47,8 @@ async def main() -> None:
     await init_scheduled_posts_table()
     await seed_week1_posts()
 
+    init_yookassa()
+
     bot = Bot(token=settings.bot_token)
     dp: Dispatcher = build_dispatcher()
 
@@ -56,6 +60,24 @@ async def main() -> None:
         return web.Response(text="OK")
 
     app.router.add_get("/", health)
+
+    async def yookassa_webhook(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            event_type, user_id = parse_webhook(body)
+            logging.info("YooKassa webhook: event=%s user_id=%s", event_type, user_id)
+            if event_type == "payment.succeeded" and user_id:
+                await activate_subscription(user_id, settings.subscription_days)
+                try:
+                    await bot.send_message(user_id, "✅ Подписка активирована! Теперь у тебя безлимитный доступ ко всем функциям.")
+                except Exception:
+                    logging.exception("Failed to send subscription confirmation to user %s", user_id)
+            return web.Response(text="OK", status=200)
+        except Exception:
+            logging.exception("YooKassa webhook error")
+            return web.Response(text="Error", status=500)
+
+    app.router.add_post("/yookassa/webhook", yookassa_webhook)
 
     webhook_path = os.getenv("WEBHOOK_PATH", "/tg/webhook")
     webhook_secret = os.getenv("WEBHOOK_SECRET")

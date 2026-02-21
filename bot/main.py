@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 
-from bot.routers import feedback, menu, outfits, subscription, trends, voice, wardrobe
+from bot.routers import feedback, menu, outfits, payment, search, subscription, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.storage import init_storage
 from config.logging import setup_logging
@@ -17,7 +17,9 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.include_router(wardrobe.router)
     dispatcher.include_router(outfits.router)
     dispatcher.include_router(trends.router)
+    dispatcher.include_router(payment.router)
     dispatcher.include_router(subscription.router)
+    dispatcher.include_router(search.router)
     dispatcher.include_router(voice.router)
     dispatcher.include_router(feedback.router)
     return dispatcher

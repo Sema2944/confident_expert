@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     max_items_per_user: int = 60
     rate_limit_upload_per_min: int = 10
     log_level: str = "INFO"
+    yookassa_shop_id: str | None = None
+    yookassa_secret_key: str | None = None
+    yookassa_return_url: str = "https://t.me/wardrobe_24_bot"
+    subscription_price: int = 399
+    subscription_days: int = 30
+    admitad_uid: str = ""
 
     class Config:
         env_file = ".env"
