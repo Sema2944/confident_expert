@@ -15,7 +15,7 @@ async def cmd_start(message: Message) -> None:
     items = await get_items(message.from_user.id)
     if not items:
         await message.answer(
-            f"{START_MESSAGE}\n\nКогда загрузишь вещи, нажми '🔥 Сегодня' для быстрого образа.",
+            f"{START_MESSAGE}\n\nКогда загрузишь вещи, нажми '✨ Собрать образ' для первого образа.",
             reply_markup=menu_keyboard(),
         )
         return
