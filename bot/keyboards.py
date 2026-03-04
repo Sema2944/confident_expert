@@ -143,6 +143,33 @@ def confirm_ai_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def wardrobe_filter_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👕 Верх", callback_data="wfilter:top"),
+            InlineKeyboardButton(text="👖 Низ", callback_data="wfilter:bottom"),
+            InlineKeyboardButton(text="👟 Обувь", callback_data="wfilter:shoes"),
+        ],
+        [
+            InlineKeyboardButton(text="🧥 Верхняя", callback_data="wfilter:outerwear"),
+            InlineKeyboardButton(text="👗 Платья", callback_data="wfilter:onepiece"),
+            InlineKeyboardButton(text="🎩 Аксессуары", callback_data="wfilter:accessory"),
+        ],
+        [
+            InlineKeyboardButton(text="❄️ Зима", callback_data="wfilter:s:winter"),
+            InlineKeyboardButton(text="🍂 Демисезон", callback_data="wfilter:s:demi"),
+            InlineKeyboardButton(text="☀️ Лето", callback_data="wfilter:s:summer"),
+        ],
+        [
+            InlineKeyboardButton(text="💰 По цене ↓", callback_data="wsort:price_desc"),
+            InlineKeyboardButton(text="🕐 Новые", callback_data="wsort:date_desc"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 Все вещи", callback_data="wfilter:all"),
+        ],
+    ])
+
+
 def location_request_keyboard() -> ReplyKeyboardMarkup:
     """Клавиатура с кнопкой геолокации + текстовый ввод."""
     return ReplyKeyboardMarkup(

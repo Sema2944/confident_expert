@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.main import build_dispatcher
-from bot.scheduler import init_scheduled_posts_table, scheduler_loop, seed_week1_posts
+from bot.scheduler import init_scheduled_posts_table, scheduler_loop, seed_week1_posts, seed_week2_posts
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
@@ -46,6 +46,7 @@ async def main() -> None:
     await init_storage()
     await init_scheduled_posts_table()
     await seed_week1_posts()
+    await seed_week2_posts()
 
     init_yookassa()
 

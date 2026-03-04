@@ -349,6 +349,82 @@ WEEK1_POSTS = [
 ]
 
 
+WEEK2_POSTS = [
+    {
+        "scheduled_at": _msk(2026, 3, 8, 10, 0),
+        "post_type": "text",
+        "text_content": (
+            "🎨 Как сочетать цвета?\n\n"
+            "Правило 60-30-10:\n"
+            "60% — базовый цвет (серый, чёрный, белый, бежевый)\n"
+            "30% — дополнительный (тёмно-синий, бордовый, хаки)\n"
+            "10% — акцент (яркий шарф, сумка, обувь)\n\n"
+            "Наш бот автоматически учитывает это правило при подборе образов. "
+            "Попробуй: @shkaf_rabotaet_bot"
+        ),
+    },
+    {
+        "scheduled_at": _msk(2026, 3, 10, 10, 0),
+        "post_type": "text",
+        "text_content": (
+            "👔 Капсульный гардероб: 15 вещей → 30 образов\n\n"
+            "Базовый набор:\n"
+            "— 3 верха (белая рубашка, серый свитер, футболка)\n"
+            "— 2 низа (джинсы, брюки)\n"
+            "— 2 обуви (кроссовки, ботинки)\n"
+            "— 1 верхняя (куртка/пальто)\n\n"
+            "Загрузи свои вещи в бот — он покажет, "
+            "сколько образов можно собрать: @shkaf_rabotaet_bot"
+        ),
+    },
+    {
+        "scheduled_at": _msk(2026, 3, 12, 10, 0),
+        "post_type": "text",
+        "text_content": (
+            "❄️ Как одеваться по погоде и выглядеть стильно?\n\n"
+            "Наш бот определяет погоду в твоём городе "
+            "и подбирает образ из ТВОИХ вещей.\n\n"
+            "Не нужно думать — просто нажми «✨ Собрать образ» "
+            "и получи готовый вариант за 5 секунд.\n\n"
+            "Попробуй: @shkaf_rabotaet_bot"
+        ),
+    },
+]
+
+
+async def seed_week2_posts() -> int:
+    async with _connect() as conn:
+        changed = 0
+        for post in WEEK2_POSTS:
+            cursor = await conn.execute(
+                "SELECT id, status FROM scheduled_posts WHERE scheduled_at = ?",
+                (post["scheduled_at"],),
+            )
+            existing = await cursor.fetchone()
+            if existing:
+                continue
+            await conn.execute(
+                """
+                INSERT INTO scheduled_posts
+                    (scheduled_at, post_type, text_content,
+                     poll_question, poll_options_json, channel_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    post["scheduled_at"],
+                    post["post_type"],
+                    post.get("text_content"),
+                    post.get("poll_question"),
+                    post.get("poll_options_json"),
+                    CHANNEL_ID,
+                ),
+            )
+            changed += 1
+        await conn.commit()
+    logging.info("Seeded/updated %d scheduled posts (Week 2)", changed)
+    return changed
+
+
 async def seed_week1_posts() -> int:
     async with _connect() as conn:
         changed = 0

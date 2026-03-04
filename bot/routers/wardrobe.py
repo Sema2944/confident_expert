@@ -18,7 +18,9 @@ from bot.keyboards import (
     category_keyboard, menu_keyboard, photo_upload_keyboard, wardrobe_view_keyboard,
     confirm_ai_keyboard, manual_category_keyboard, subcategory_keyboard,
     color_keyboard, season_inline_keyboard, formality_keyboard,
+    wardrobe_filter_keyboard,
 )
+from config.settings import settings
 from bot.storage import (
     add_item,
     delete_item_by_id,
@@ -150,6 +152,27 @@ def _format_price(value: int) -> str:
     return f"{value:,} ₽".replace(",", " ")
 
 
+async def _check_first_outfit_trigger(message: Message, user_id: int) -> None:
+    """После загрузки вещи — проверить, можно ли собрать первый образ (Task 12)."""
+    items = await get_items(user_id)
+    categories = {item.get("category") for item in items}
+
+    if len(items) == 1:
+        cat_label = CATEGORY_LABELS_RU.get(str(items[0].get("category") or ""), "вещь")
+        await message.answer(
+            f"👍 Первая вещь добавлена! Добавь ещё хотя бы одну — и я покажу, что можно собрать."
+        )
+    elif len(items) == 2 and ("top" in categories or "onepiece" in categories) and "bottom" in categories:
+        await message.answer(
+            "🎉 Отлично! У тебя уже есть верх и низ — могу собрать первый образ!\n\n"
+            "👟 Добавь обувь для полного образа, или нажми «✨ Собрать образ» прямо сейчас.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✨ Собрать первый образ!", callback_data="outfit:quick_first")],
+                [InlineKeyboardButton(text="📥 Сначала добавлю обувь", callback_data="continue_upload")],
+            ]),
+        )
+
+
 async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
     items = await get_items(user_id)
     if not items:
@@ -184,6 +207,7 @@ async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
         gaps_markup = InlineKeyboardMarkup(inline_keyboard=gap_buttons)
 
     await message.answer("\n".join(lines), reply_markup=gaps_markup)
+    await message.answer("Фильтры и сортировка:", reply_markup=wardrobe_filter_keyboard())
 
     for item in items:
         preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
@@ -317,30 +341,7 @@ async def ai_confirm_handler(callback: CallbackQuery, state: FSMContext) -> None
 
     await state.update_data(ai_saved_item_id=None)
 
-    items = await get_items(callback.from_user.id)
-    categories_present = {item.get("category") for item in items}
-    can_build = (
-        ("top" in categories_present and "bottom" in categories_present)
-        or "onepiece" in categories_present
-    ) and "shoes" in categories_present
-
-    if can_build and len(items) <= 5:
-        await callback.message.answer(
-            "Отлично! Уже можно собрать первый образ! Нажми «✨ Собрать образ» или продолжай добавлять вещи.",
-        )
-    elif not can_build:
-        missing = []
-        if "shoes" not in categories_present:
-            missing.append("обувь")
-        if "onepiece" not in categories_present:
-            if "top" not in categories_present:
-                missing.append("верх")
-            if "bottom" not in categories_present:
-                missing.append("низ")
-        if missing:
-            await callback.message.answer(
-                f"Для первого образа осталось добавить: {', '.join(missing)}."
-            )
+    await _check_first_outfit_trigger(callback.message, callback.from_user.id)
 
     await callback.message.answer(
         "Отправьте следующее фото или нажмите ⬅️ Назад.",
@@ -512,17 +513,7 @@ async def manual_price_entered(message: Message, state: FSMContext) -> None:
         manual_ai_category=None, ai_saved_item_id=None,
     )
 
-    items = await get_items(message.from_user.id)
-    categories_present = {item.get("category") for item in items}
-    can_build = (
-        ("top" in categories_present and "bottom" in categories_present)
-        or "onepiece" in categories_present
-    ) and "shoes" in categories_present
-
-    if can_build and len(items) <= 5:
-        await message.answer(
-            "Уже можно собрать первый образ! Нажми «✨ Собрать образ» или продолжай добавлять вещи.",
-        )
+    await _check_first_outfit_trigger(message, message.from_user.id)
 
     await state.set_state(BotStates.upload_photos)
     await message.answer(
@@ -763,6 +754,134 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
     await _render_wardrobe_cards(message, message.from_user.id)
 
 
+# ── Task 12: быстрый первый образ ───────────────────────────────
+
+
+@router.callback_query(F.data == "outfit:quick_first")
+async def quick_first_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Собрать образ из того, что есть (даже 2 вещи без обуви)."""
+    await callback.answer()
+    if not callback.message:
+        return
+    items = await get_items(callback.from_user.id)
+    if len(items) < 2:
+        await callback.message.answer("Добавь хотя бы 2 вещи для первого образа.")
+        return
+
+    from services.weather_service import detect_season_for_user
+    season, weather_msg = await detect_season_for_user(callback.from_user.id)
+    await callback.message.answer(weather_msg)
+
+    # Импортируем _generate_and_show_outfit из outfits router
+    from bot.routers.outfits import _generate_and_show_outfit
+    await _generate_and_show_outfit(
+        message=callback.message,
+        state=state,
+        occasion_code="casual",
+        season=season,
+    )
+
+
+@router.callback_query(F.data == "continue_upload")
+async def continue_upload_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    """Пользователь хочет добавить ещё вещи перед первым образом."""
+    await callback.answer()
+    if not callback.message:
+        return
+    await state.set_state(BotStates.upload_photos)
+    await callback.message.answer(
+        "Хорошо! Добавь следующую вещь.",
+        reply_markup=photo_upload_keyboard(),
+    )
+
+
+# ── Task 13: фильтрация и сортировка гардероба ──────────────────
+
+
+async def _show_items_page(message: Message, items: list[dict], label: str, page: int = 0) -> None:
+    """Показать страницу из 5 вещей (текстовые карточки)."""
+    page_size = 5
+    start = page * page_size
+    page_items = items[start:start + page_size]
+    total = len(items)
+
+    header = f"{label}: {total} вещ{'ь' if total == 1 else 'и' if 2 <= total <= 4 else 'ей'}"
+    await message.answer(header)
+
+    for item in page_items:
+        preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
+        caption = _build_item_caption(item)
+        price = item.get("price") or 0
+        if price:
+            caption += f"\n💰 {_format_price(price)}"
+        if preview_file_id:
+            await message.answer_photo(
+                photo=str(preview_file_id),
+                caption=caption,
+                reply_markup=_item_actions_keyboard(int(item["id"])),
+            )
+        else:
+            await message.answer(caption, reply_markup=_item_actions_keyboard(int(item["id"])))
+
+    # Показать ещё
+    if start + page_size < total:
+        remaining = total - start - page_size
+        await message.answer(
+            f"Показано {min(page_size, total)} из {total}. Ещё {remaining} вещей.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Показать ещё ({remaining})", callback_data=f"wpage:{page+1}:{label}")]
+            ]),
+        )
+
+
+@router.callback_query(F.data.startswith("wfilter:"))
+async def wardrobe_filter(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    user_id = callback.from_user.id
+    items = await get_items(user_id)
+
+    filter_key = callback.data.split(":", 1)[1]
+
+    if filter_key == "all":
+        filtered = items
+        label = "📋 Все вещи"
+    elif filter_key.startswith("s:"):
+        season = filter_key.split(":")[1]
+        filtered = [i for i in items if (i.get("season") or "").lower() == season]
+        label = {"winter": "❄️ Зимние", "demi": "🍂 Демисезон", "summer": "☀️ Летние"}.get(season, season)
+    else:
+        filtered = [i for i in items if i.get("category") == filter_key]
+        label = CATEGORY_LABELS_RU.get(filter_key, filter_key)
+
+    if not filtered:
+        await callback.message.answer(f"{label}: пусто")
+        return
+
+    await _show_items_page(callback.message, filtered, label, page=0)
+
+
+@router.callback_query(F.data.startswith("wsort:"))
+async def wardrobe_sort(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    items = await get_items(callback.from_user.id)
+
+    sort_key = callback.data.split(":")[1]
+    if sort_key == "price_desc":
+        items = sorted(items, key=lambda x: x.get("price") or 0, reverse=True)
+        label = "💰 По цене (дорогие → дешёвые)"
+    elif sort_key == "date_desc":
+        items = sorted(items, key=lambda x: x.get("created_at") or "", reverse=True)
+        label = "🕐 Новые первые"
+    else:
+        label = "📋 Все вещи"
+
+    await _show_items_page(callback.message, items, label, page=0)
+
+
 # ── /check — проверка совместимости двух вещей ──────────────────
 
 
@@ -838,4 +957,40 @@ async def handle_check_photo(message: Message, state: FSMContext) -> None:
 async def check_back(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.menu)
     await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+
+
+# ── Task 15: советы стилиста ─────────────────────────────────────
+
+
+@router.message(Command("advice"))
+async def cmd_style_advice(message: Message) -> None:
+    from services.subscription_service import get_or_create_user
+    user = await get_or_create_user(message.from_user.id)
+    is_premium = user.get("subscription_status") == "active"
+
+    if not is_premium:
+        await message.answer(
+            "💡 Персональные советы стилиста — функция подписки.\n\n"
+            "Я проанализирую весь твой гардероб и дам 3 совета: "
+            "по цветам, стилю и сезонности.\n\n"
+            f"💎 Подписка — {settings.subscription_price} ₽/мес",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Оформить", callback_data="pay:subscribe")],
+            ]),
+        )
+        return
+
+    items = await get_items(message.from_user.id)
+    if len(items) < 5:
+        await message.answer("Добавь хотя бы 5 вещей, чтобы я мог дать точные советы.")
+        return
+
+    await message.answer("💡 Анализирую твой гардероб…")
+
+    from services.style_advisor_service import generate_personal_advice
+    advice = await generate_personal_advice(items)
+    if advice:
+        await message.answer(f"💡 Советы стилиста:\n\n{advice}")
+    else:
+        await message.answer("Не удалось подготовить советы. Попробуй позже.")
 

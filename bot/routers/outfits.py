@@ -2,11 +2,12 @@ import logging
 import random
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard, season_keyboard
-from bot.storage import get_items, log_outfit_feedback, record_paywall_hit
+from bot.storage import get_items, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
 from config.settings import settings
 from bot.states import BotStates
@@ -200,6 +201,14 @@ async def _generate_and_show_outfit(
 
     if shown_count > 0:
         await increment_outfit_count(message.from_user.id)
+        # Сохранить образ в историю (последний из показанных)
+        if outfits:
+            last = outfits[-1]
+            history_ids = [fid for fids in last.items.values() for fid in fids if fid]
+            try:
+                await save_outfit_to_history(message.from_user.id, history_ids, occasion_code, season)
+            except Exception:
+                logging.exception("Failed to save outfit to history")
         if random.random() < 0.3:
             await message.answer(random.choice(COMPLIMENTS))
 
@@ -601,3 +610,29 @@ async def set_season(message: Message, state: FSMContext) -> None:
         season=season,
         count=1,
     )
+
+
+# ── Task 14: история образов ─────────────────────────────────────
+
+
+@router.message(Command("history"))
+async def cmd_outfit_history(message: Message) -> None:
+    from bot.storage import get_outfit_history
+    history = await get_outfit_history(message.from_user.id, days=7)
+
+    if not history:
+        await message.answer(
+            "За последнюю неделю образов не было. Нажми «✨ Собрать образ»!",
+            reply_markup=menu_keyboard(),
+        )
+        return
+
+    lines = ["📅 Твои образы за неделю:\n"]
+    for i, entry in enumerate(history[:7], 1):
+        date = entry["created_at"][:10] if entry.get("created_at") else "?"
+        occasion = entry.get("occasion", "?")
+        liked = " ❤️" if entry.get("liked") else ""
+        items_count = len(entry.get("outfit_items", []))
+        lines.append(f"{i}. {date} — {occasion}, {items_count} вещей{liked}")
+
+    await message.answer("\n".join(lines))

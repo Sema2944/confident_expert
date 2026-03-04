@@ -94,6 +94,23 @@ async def init_storage() -> None:
         if "morning_push_hour" not in user_cols:
             await connection.execute("ALTER TABLE user_profiles ADD COLUMN morning_push_hour INTEGER DEFAULT 8")
 
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS outfit_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                outfit_items TEXT NOT NULL,
+                occasion TEXT,
+                season TEXT,
+                liked INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_outfit_history_user_date ON outfit_history (user_id, created_at)"
+        )
+
         await connection.commit()
 
 
@@ -191,12 +208,22 @@ async def add_item(
 
 def _build_item_payload(row: aiosqlite.Row) -> dict[str, str | int | None]:
     metadata = json.loads(row["metadata_json"])
+    try:
+        price = row["price"] or 0
+    except Exception:
+        price = 0
+    try:
+        created_at = row["created_at"]
+    except Exception:
+        created_at = None
     return {
         "id": row["id"],
         "category": row["category"],
         "telegram_file_id": row["telegram_file_id"],
         "processed_file_id": row["processed_file_id"],
         "display_name": row["display_name"],
+        "price": price,
+        "created_at": created_at,
         "type": metadata.get("type", "unknown"),
         "primary_color": metadata.get("primary_color", "unknown"),
         "secondary_color": metadata.get("secondary_color", "unknown"),
@@ -211,7 +238,7 @@ async def get_items(user_id: int) -> list[dict[str, str | int | None]]:
     async with _connect() as connection:
         cursor = await connection.execute(
             """
-            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at
             FROM wardrobe_items
             WHERE user_id = ?
             ORDER BY id ASC
@@ -227,7 +254,7 @@ async def delete_item_by_id(user_id: int, item_id: int) -> dict[str, str | int |
     async with _connect() as connection:
         cursor = await connection.execute(
             """
-            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at
             FROM wardrobe_items
             WHERE id = ? AND user_id = ?
             """,
@@ -476,3 +503,46 @@ async def get_morning_push_users(hour: int) -> list[dict]:
             (hour,),
         )).fetchall()
         return [dict(r) for r in rows]
+
+
+# ─── Outfit History ─────────────────────────────────────────────
+
+
+async def save_outfit_to_history(
+    user_id: int,
+    item_file_ids: list[str],
+    occasion: str,
+    season: str,
+) -> None:
+    async with _connect() as connection:
+        await connection.execute(
+            "INSERT INTO outfit_history (user_id, outfit_items, occasion, season) VALUES (?, ?, ?, ?)",
+            (user_id, json.dumps(item_file_ids), occasion, season),
+        )
+        await connection.commit()
+
+
+async def get_outfit_history(user_id: int, days: int = 7) -> list[dict]:
+    async with _connect() as connection:
+        rows = await (await connection.execute(
+            """SELECT outfit_items, occasion, season, liked, created_at
+               FROM outfit_history WHERE user_id = ?
+               AND created_at >= datetime('now', ?)
+               ORDER BY created_at DESC""",
+            (user_id, f"-{days} days"),
+        )).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["outfit_items"] = json.loads(d["outfit_items"])
+        result.append(d)
+    return result
+
+
+async def get_recent_outfit_item_ids(user_id: int, days: int = 3) -> set[str]:
+    """Вещи, использованные в образах за последние N дней."""
+    history = await get_outfit_history(user_id, days=days)
+    used: set[str] = set()
+    for entry in history:
+        used.update(entry["outfit_items"])
+    return used
