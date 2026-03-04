@@ -424,6 +424,9 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
         await callback.message.answer("Готовлю визуализацию на манекене… Это займёт 15–30 секунд.")
 
+        user = await get_or_create_user(callback.from_user.id)
+        is_premium = user.get("subscription_status") == "active"
+
         description = await describe_items_for_mannequin(callback.message.bot, items_payload)
         if not description:
             # Fallback на старый метод
@@ -440,7 +443,7 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer("Не удалось подготовить визуализацию. Попробуйте чуть позже.")
             return
 
-        mannequin_image = await generate_mannequin_image(description)
+        mannequin_image = await generate_mannequin_image(description, is_premium=is_premium)
         if not mannequin_image:
             # Fallback на старый метод
             image_prompt = data.get("last_image_prompt")
@@ -456,11 +459,12 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer("Не удалось подготовить визуализацию. Попробуйте чуть позже.")
             return
 
+        quality_note = "" if is_premium else "\n\n💎 С подпиской — визуализация в премиум-качестве"
         await callback.message.answer_photo(
             photo=BufferedInputFile(mannequin_image, filename="mannequin_outfit.png"),
-            caption="✨ Твой образ на манекене — фронт и профиль",
+            caption=f"✨ Твой образ на манекене — фронт и профиль{quality_note}",
         )
-        await _log_outfit_event("outfit_visualize", callback.message)
+        await _log_outfit_event("outfit_visualize", callback.message, premium=is_premium)
     except Exception:
         logging.exception("Failed to handle outfit visualize callback")
 
@@ -493,9 +497,19 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
     if not occasion:
         await message.answer("Не понял повод. Выберите кнопку.")
         return
-    await state.update_data(occasion=occasion)
-    await state.set_state(BotStates.request_season)
-    await message.answer("Какой сезон?", reply_markup=season_keyboard())
+
+    # Авто-определение сезона по погоде
+    from services.weather_service import detect_season_for_user
+    season, weather_msg = await detect_season_for_user(message.from_user.id)
+
+    await message.answer(weather_msg)
+    await _generate_and_show_outfit(
+        message=message,
+        state=state,
+        occasion_code=occasion,
+        season=season,
+        count=1,
+    )
 
 
 @router.message(BotStates.request_season, F.text)

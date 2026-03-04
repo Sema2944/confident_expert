@@ -18,20 +18,20 @@ def analyze_wardrobe_gaps(items: list[dict]) -> str | None:
     categories = {item.get("category") for item in items}
     hints: list[str] = []
 
-    # Приоритет 1: нет обуви
+    # Приоритет 1: мало вещей
+    if len(items) < 3:
+        hints.append("📦 Пока в гардеробе мало вещей. Добавь хотя бы 3 — и я покажу первый образ.")
+
+    # Приоритет 2: нет обуви
     if "shoes" not in categories:
         hints.append("👟 Добавь обувь — без неё я не могу собрать полный образ.")
 
-    # Приоритет 2: нет верха/низа
+    # Приоритет 3: нет верха/низа
     if "onepiece" not in categories:
         if "top" not in categories:
             hints.append("👕 Добавь хотя бы одну вещь верха или платье, чтобы я мог собирать образы.")
         if "bottom" not in categories:
             hints.append("👖 Добавь брюки или юбку — пока не из чего собрать низ образа.")
-
-    # Приоритет 3: мало вещей
-    if len(items) < 3:
-        hints.append("📦 Пока в гардеробе мало вещей. Добавь хотя бы 3 — и я покажу первый образ.")
 
     # Приоритет 4: дисбаланс по сезону
     if not hints:

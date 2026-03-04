@@ -19,3 +19,4 @@ class BotStates(StatesGroup):
     manual_enter_price = State()
     editing_price = State()
     search_mode = State()
+    setting_city = State()

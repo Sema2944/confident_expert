@@ -1,8 +1,15 @@
-"""Визуализация образа на манекене из реальных фото пользователя."""
+"""Визуализация образа на манекене из реальных фото пользователя.
 
+Двухуровневая генерация:
+- Trial → Flux 1.1 Pro (Replicate) — дешёвый, быстрый, приемлемое качество
+- Premium → gpt-image-1 (OpenAI) — лучшее качество текстур и цветов
+"""
+
+import asyncio
 import base64
 import logging
 from io import BytesIO
+
 import httpx
 from config.settings import settings
 
@@ -20,8 +27,29 @@ def prepare_photo_for_api(photo_bytes: bytes) -> str:
     return base64.b64encode(photo_bytes).decode("utf-8")
 
 
+def _build_mannequin_prompt(description: str) -> str:
+    return (
+        "Professional fashion photography of TWO faceless white fabric-covered mannequins "
+        "standing side by side on a clean white studio background.\n"
+        "LEFT mannequin: FRONT view, facing camera directly.\n"
+        "RIGHT mannequin: 3/4 SIDE view, turned slightly to the right.\n\n"
+        "Both mannequins wear the EXACT SAME outfit:\n"
+        f"{description}\n\n"
+        "Requirements:\n"
+        "- Smooth egg-shaped heads, no face features\n"
+        "- Metal circular base plates visible under each mannequin\n"
+        "- Natural fabric draping, realistic textures and colors\n"
+        "- Soft diffused studio lighting, gentle shadows\n"
+        "- Clean white background\n"
+        "- Photo-realistic quality, fashion catalog style"
+    )
+
+
+# ─── Шаг 1: Vision-описание ───────────────────────────────
+
+
 async def describe_items_for_mannequin(bot, items_payload: dict[str, list[str]]) -> str:
-    """Шаг 1: фото вещей → gpt-4o vision → детальное описание."""
+    """Шаг 1: фото вещей → vision → детальное описание."""
     if not settings.ai_api_key:
         return ""
 
@@ -33,8 +61,15 @@ async def describe_items_for_mannequin(bot, items_payload: dict[str, list[str]])
 
     content_parts = [{"type": "text", "text": (
         "Ты модный стилист. Опиши КАЖДУЮ вещь на фото для художника, который нарисует манекен.\n"
-        "Для каждой вещи: тип, точный цвет, материал/текстура, крой/силуэт, детали, как сидит, вид сбоку.\n"
-        "Формат: пронумерованный список."
+        "Для каждой вещи укажи:\n"
+        "1. Тип (футболка, джинсы, кроссовки...)\n"
+        "2. Точный цвет и оттенок\n"
+        "3. Материал / текстура (хлопок, деним, кожа, вязаное...)\n"
+        "4. Крой и силуэт (oversize, приталенное, прямое, высокая посадка...)\n"
+        "5. Детали (принт, пуговицы, молния, карманы, лейблы...)\n"
+        "6. Как сидит: заправлено, навыпуск, длина\n"
+        "7. Вид сбоку: профиль этой вещи\n\n"
+        "Формат: пронумерованный список, по одной вещи."
     )}]
 
     for file_id in all_file_ids[:5]:
@@ -62,20 +97,13 @@ async def describe_items_for_mannequin(bot, items_payload: dict[str, list[str]])
         return ""
 
 
-async def generate_mannequin_image(description: str) -> bytes | None:
-    """Шаг 2: описание → gpt-image-1 → манекен фронт + профиль."""
-    if not settings.image_api_key or not description:
+# ─── Шаг 2: Генерация картинки ────────────────────────────
+
+
+async def _generate_with_openai(prompt: str) -> bytes | None:
+    """Генерация через gpt-image-1 (OpenAI). Премиум: ~6₽/картинка."""
+    if not settings.image_api_key:
         return None
-
-    prompt = (
-        "Professional fashion photography of TWO faceless white fabric-covered mannequins side by side "
-        "on clean white studio background. LEFT: front view. RIGHT: 3/4 side view. "
-        "Both wear the EXACT SAME outfit:\n"
-        f"{description}\n\n"
-        "Smooth egg-shaped heads, metal base plates, natural fabric draping, "
-        "realistic textures, soft studio lighting, photo-realistic quality."
-    )
-
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
@@ -86,5 +114,75 @@ async def generate_mannequin_image(description: str) -> bytes | None:
             resp.raise_for_status()
             return base64.b64decode(resp.json()["data"][0]["b64_json"])
     except Exception:
-        logger.exception("Mannequin generation failed")
+        logger.exception("OpenAI image generation failed")
         return None
+
+
+async def _generate_with_replicate(prompt: str) -> bytes | None:
+    """Генерация через Flux 1.1 Pro (Replicate). Бюджет: ~2₽/картинка."""
+    token = settings.replicate_api_token
+    if not token:
+        return None
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
+                headers=headers,
+                json={"input": {"prompt": prompt, "aspect_ratio": "16:9", "output_format": "png", "safety_tolerance": 5}},
+            )
+            resp.raise_for_status()
+            prediction = resp.json()
+
+            get_url = prediction.get("urls", {}).get("get")
+            if not get_url:
+                return None
+
+            for _ in range(60):
+                await asyncio.sleep(2)
+                poll_resp = await client.get(get_url, headers=headers)
+                poll_resp.raise_for_status()
+                poll_data = poll_resp.json()
+                status = poll_data.get("status")
+                if status == "succeeded":
+                    output = poll_data.get("output")
+                    image_url = output[0] if isinstance(output, list) else output
+                    if isinstance(image_url, str) and image_url.startswith("http"):
+                        img_resp = await client.get(image_url)
+                        img_resp.raise_for_status()
+                        return img_resp.content
+                    return None
+                elif status == "failed":
+                    logger.error("Replicate prediction failed: %s", poll_data.get("error"))
+                    return None
+
+            logger.error("Replicate prediction timed out")
+            return None
+    except Exception:
+        logger.exception("Replicate image generation failed")
+        return None
+
+
+async def generate_mannequin_image(description: str, is_premium: bool = False) -> bytes | None:
+    """Шаг 2: генерация манекена.
+
+    is_premium=True  → gpt-image-1 (лучшее качество)
+    is_premium=False → Flux 1.1 Pro (дешевле) с fallback на OpenAI
+    """
+    if not description:
+        return None
+
+    prompt = _build_mannequin_prompt(description)
+
+    if is_premium:
+        result = await _generate_with_openai(prompt)
+        if result:
+            return result
+        return await _generate_with_replicate(prompt)
+    else:
+        if settings.replicate_api_token:
+            result = await _generate_with_replicate(prompt)
+            if result:
+                return result
+        return await _generate_with_openai(prompt)

@@ -141,3 +141,15 @@ def confirm_ai_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✏️ Указать вручную", callback_data="ai_manual"),
         ]
     ])
+
+
+def location_request_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура с кнопкой геолокации + текстовый ввод."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📍 Отправить геолокацию", request_location=True)],
+            [KeyboardButton(text="⬅️ Пропустить (Москва)")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )

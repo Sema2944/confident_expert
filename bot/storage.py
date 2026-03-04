@@ -79,6 +79,15 @@ async def init_storage() -> None:
             )
             """
         )
+        # Миграция: координаты пользователя
+        user_cols = {row["name"] for row in await (await connection.execute("PRAGMA table_info(user_profiles)")).fetchall()}
+        if "city" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN city TEXT DEFAULT 'Москва'")
+        if "lat" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN lat REAL")
+        if "lon" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN lon REAL")
+
         await connection.commit()
 
 
@@ -384,4 +393,24 @@ async def update_item_price(user_id: int, item_id: int, price: int) -> bool:
 async def clear_user_items(user_id: int) -> None:
     async with _connect() as connection:
         await connection.execute("DELETE FROM wardrobe_items WHERE user_id = ?", (user_id,))
+        await connection.commit()
+
+
+async def get_user_location(user_id: int) -> tuple[str, float | None, float | None]:
+    """Возвращает (city, lat, lon). Город по умолчанию 'Москва'."""
+    async with _connect() as connection:
+        row = await (await connection.execute(
+            "SELECT city, lat, lon FROM user_profiles WHERE user_id = ?", (user_id,),
+        )).fetchone()
+        if row:
+            return (row["city"] or "Москва", row["lat"], row["lon"])
+        return ("Москва", None, None)
+
+
+async def set_user_location(user_id: int, city: str, lat: float | None = None, lon: float | None = None) -> None:
+    async with _connect() as connection:
+        await connection.execute(
+            "UPDATE user_profiles SET city = ?, lat = ?, lon = ? WHERE user_id = ?",
+            (city, lat, lon, user_id),
+        )
         await connection.commit()
