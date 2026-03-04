@@ -66,3 +66,63 @@ def analyze_wardrobe_gaps(items: list[dict]) -> str | None:
         return None
 
     return "\n".join(hints[:2])
+
+
+def analyze_wardrobe_gaps_with_actions(items: list[dict]) -> tuple[str | None, list[dict]]:
+    """Возвращает (текст подсказок, список кнопок поиска) или (None, []).
+
+    Каждый элемент списка кнопок: {"label": str, "query": str}.
+    """
+    if not items:
+        return None, []
+
+    categories = {item.get("category") for item in items}
+    hints: list[str] = []
+    actions: list[dict] = []
+
+    if len(items) < 3:
+        hints.append("📦 Пока в гардеробе мало вещей. Добавь хотя бы 3 — и я покажу первый образ.")
+
+    if "shoes" not in categories:
+        hints.append("👟 Добавь обувь — без неё нельзя собрать образ.")
+        actions.append({"label": "🔍 Найти обувь в Wildberries", "query": "женская обувь базовая"})
+
+    if "onepiece" not in categories:
+        if "top" not in categories:
+            hints.append("👕 Добавь верх — футболку, блузу или свитер.")
+            actions.append({"label": "🔍 Найти верх в Wildberries", "query": "футболка женская базовая"})
+        if "bottom" not in categories:
+            hints.append("👖 Добавь низ — брюки или юбку.")
+            actions.append({"label": "🔍 Найти низ в Wildberries", "query": "брюки женские базовые"})
+
+    if not hints:
+        seasons = {
+            item.get("season")
+            for item in items
+            if item.get("season") and item.get("season") != "unknown"
+        }
+        if len(seasons) == 1:
+            season = next(iter(seasons))
+            label = _SEASON_RU.get(season, season)
+            if season != "all":
+                hints.append(f"🌦 Все вещи на один сезон ({label}). Добавь вещи на другие сезоны.")
+
+    if not hints:
+        formalities = {
+            item.get("formality")
+            for item in items
+            if item.get("formality") and item.get("formality") != "unknown"
+        }
+        if len(formalities) == 1:
+            formality = next(iter(formalities))
+            label = _FORMALITY_RU.get(formality, formality)
+            hints.append(f"💼 Все вещи {label}-стиля. Для разных поводов добавь вещи другого стиля.")
+
+    if not hints and len(items) > 10 and "accessory" not in categories:
+        hints.append("🧢 Попробуй добавить аксессуар — он сделает образы выразительнее.")
+        actions.append({"label": "🔍 Найти аксессуары", "query": "аксессуары женские базовые"})
+
+    if not hints:
+        return None, []
+
+    return "\n".join(hints[:2]), actions[:2]

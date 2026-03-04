@@ -3,8 +3,10 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from bot.storage import set_morning_push
 from config.settings import settings
 from services.payment_service import create_payment, is_yookassa_configured
 from services.subscription_service import get_or_create_user
@@ -74,3 +76,54 @@ async def pay_subscribe(callback: CallbackQuery) -> None:
         ]),
     )
     logger.info("Payment created for user %s: %s", callback.from_user.id, result["payment_id"])
+
+
+# ── Morning push handlers ────────────────────────────────────
+
+@router.callback_query(F.data.startswith("push:enable:"))
+async def enable_push(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    hour = int(callback.data.split(":")[2])
+    await set_morning_push(callback.from_user.id, enabled=True, hour=hour)
+    await callback.message.answer(
+        f"☀️ Отлично! Каждое утро в {hour}:00 буду присылать образ по погоде.\n"
+        "Отключить: /push_off",
+    )
+
+
+@router.callback_query(F.data == "push:select_time")
+async def select_push_time(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    buttons = [
+        [InlineKeyboardButton(text=f"{h}:00", callback_data=f"push:enable:{h}")]
+        for h in [7, 8, 9, 10]
+    ]
+    await callback.message.answer(
+        "Во сколько присылать образ?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data == "push:disable")
+async def disable_push(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    await set_morning_push(callback.from_user.id, enabled=False)
+    await callback.message.answer("Хорошо, утренние образы отключены. Включить: /push_on")
+
+
+@router.message(Command("push_off"))
+async def cmd_push_off(message: Message) -> None:
+    await set_morning_push(message.from_user.id, enabled=False)
+    await message.answer("Утренние образы отключены. Включить: /push_on")
+
+
+@router.message(Command("push_on"))
+async def cmd_push_on(message: Message) -> None:
+    await set_morning_push(message.from_user.id, enabled=True, hour=8)
+    await message.answer("☀️ Утренние образы включены — буду присылать в 8:00.")

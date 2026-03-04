@@ -2,6 +2,7 @@ import logging
 from io import BytesIO
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
@@ -32,7 +33,8 @@ from bot.storage import (
 from bot.states import BotStates
 from config.categories import CATEGORY_LABELS_RU, normalize_category
 from services.ai_analyze_service import AIAnalyzeService, build_russian_item_summary
-from services.wardrobe_analysis_service import analyze_wardrobe_gaps
+from services.wardrobe_analysis_service import analyze_wardrobe_gaps, analyze_wardrobe_gaps_with_actions
+from services.visual_search_service import build_affiliate_link
 
 router = Router()
 
@@ -169,12 +171,19 @@ async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
         price = stats["most_expensive"].get("price", 0)
         lines.append(f"\n👑 Самая дорогая: {name} — {_format_price(price)}")
 
-    gaps = analyze_wardrobe_gaps(items)
-    if gaps:
+    gaps_text, gap_actions = analyze_wardrobe_gaps_with_actions(items)
+    gaps_markup = None
+    if gaps_text:
         lines.append("")
-        lines.append(gaps)
+        lines.append(gaps_text)
+    if gap_actions:
+        gap_buttons = [
+            [InlineKeyboardButton(text=a["label"], url=build_affiliate_link("wildberries", a["query"]))]
+            for a in gap_actions
+        ]
+        gaps_markup = InlineKeyboardMarkup(inline_keyboard=gap_buttons)
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), reply_markup=gaps_markup)
 
     for item in items:
         preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
@@ -752,4 +761,81 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
 
     await message.answer("Название обновлено.")
     await _render_wardrobe_cards(message, message.from_user.id)
+
+
+# ── /check — проверка совместимости двух вещей ──────────────────
+
+
+@router.message(Command("check"))
+async def cmd_check(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.check_compatibility)
+    await state.update_data(check_photo_1=None)
+    await message.answer(
+        "Пришли фото первой вещи, и я скажу, сочетается ли она со второй.",
+        reply_markup=photo_upload_keyboard(),
+    )
+
+
+@router.message(BotStates.check_compatibility, F.photo)
+async def handle_check_photo(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    file_id = message.photo[-1].file_id
+
+    if not data.get("check_photo_1"):
+        await state.update_data(check_photo_1=file_id)
+        await message.answer("Отлично! Теперь пришли фото второй вещи.")
+        return
+
+    photo1_id = data["check_photo_1"]
+    await state.update_data(check_photo_1=None)
+    await state.set_state(BotStates.menu)
+
+    await message.answer("Анализирую совместимость… ⏳")
+
+    try:
+        from io import BytesIO
+        import base64
+        import httpx
+        from config.settings import settings
+
+        async def _download_b64(fid: str) -> str:
+            tg_file = await message.bot.get_file(fid)
+            buf = BytesIO()
+            await message.bot.download(tg_file, destination=buf)
+            return base64.b64encode(buf.getvalue()).decode()
+
+        b64_1, b64_2 = await _download_b64(photo1_id), await _download_b64(file_id)
+
+        content = [
+            {"type": "text", "text": (
+                "Ты — стилист. Посмотри на две вещи и скажи, сочетаются ли они между собой.\n"
+                "Ответь коротко: 1) Да/Нет/Частично, 2) Почему, 3) Совет по образу.\n"
+                "Пиши на русском, без markdown."
+            )},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_1}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_2}"}},
+        ]
+
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.post(
+                f"{settings.ai_api_base.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.ai_api_key}", "Content-Type": "application/json"},
+                json={"model": settings.ai_model, "messages": [{"role": "user", "content": content}], "max_tokens": 300},
+            )
+            resp.raise_for_status()
+            answer = resp.json()["choices"][0]["message"]["content"].strip()
+
+        await message.answer(f"🎨 Результат:\n\n{answer}", reply_markup=menu_keyboard())
+    except Exception:
+        logging.exception("Check compatibility failed")
+        await message.answer(
+            "Не удалось проверить совместимость. Попробуйте позже.",
+            reply_markup=menu_keyboard(),
+        )
+
+
+@router.message(BotStates.check_compatibility, F.text == "⬅️ Назад")
+async def check_back(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.menu)
+    await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
 

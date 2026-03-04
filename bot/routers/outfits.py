@@ -3,11 +3,12 @@ import random
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard, season_keyboard
-from bot.storage import get_items, log_outfit_feedback
+from bot.storage import get_items, log_outfit_feedback, record_paywall_hit
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
+from config.settings import settings
 from bot.states import BotStates
 from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
@@ -21,12 +22,23 @@ image_service = ImageService()
 
 OCCASIONS = {
     "🏢 Работа/офис": "work_office",
+    "💼 Собеседование": "interview",
+    "💕 Свидание": "date",
+    "🎉 Вечеринка": "party",
+    "🚶 Прогулка": "walk",
+    "🏃 Спорт": "sport_active",
+    # backward compat
     "✨ Выход в люди": "going_out",
     "🎒 Спорт/прогулки": "sport_travel",
 }
 
 OCCASION_TITLES = {
     "work_office": "Рабочий образ",
+    "interview": "Образ для собеседования",
+    "date": "Образ для свидания",
+    "party": "Образ для вечеринки",
+    "walk": "Образ для прогулки",
+    "sport_active": "Спортивный образ",
     "going_out": "Образ для выхода",
     "sport_travel": "Образ для прогулки",
     "casual": "Образ",
@@ -86,7 +98,16 @@ async def _generate_and_show_outfit(
     await get_or_create_user(message.from_user.id, message.from_user.username)
     allowed, reason = await can_generate_outfit(message.from_user.id)
     if not allowed:
-        await message.answer(reason, reply_markup=menu_keyboard())
+        await record_paywall_hit(message.from_user.id)
+        await message.answer(
+            reason,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
+                    callback_data="pay:subscribe",
+                )],
+            ]),
+        )
         await state.set_state(BotStates.menu)
         return
 
@@ -182,6 +203,34 @@ async def _generate_and_show_outfit(
         if random.random() < 0.3:
             await message.answer(random.choice(COMPLIMENTS))
 
+        # Тизеры для free-пользователей
+        user = await get_or_create_user(message.from_user.id)
+        is_premium = user.get("subscription_status") == "active"
+        if not is_premium:
+            count = user.get("outfit_requests_count", 0) + 1  # +1 т.к. increment ещё не отразился в объекте
+            if count == 1:
+                await message.answer(
+                    "💎 Кстати, с подпиской я могу показать этот образ "
+                    "на манекене — в двух ракурсах, с реальными текстурами твоих вещей."
+                )
+            elif count == 2:
+                await message.answer(
+                    "💎 С подпиской ты также можешь искать похожие вещи "
+                    "в Lamoda, Wildberries и OZON прямо из карточки."
+                )
+            elif count == 3:
+                await message.answer(
+                    "⚠️ Это был последний бесплатный образ.\n\n"
+                    "Чтобы продолжить получать образы, визуализации на манекене "
+                    "и поиск похожих вещей — оформи подписку 💎",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
+                            callback_data="pay:subscribe",
+                        )],
+                    ]),
+                )
+
 
 _NEUTRAL_COLORS = {
     "black", "white", "gray", "grey", "navy", "beige", "brown", "cream",
@@ -247,12 +296,18 @@ def _build_why_text(
         parts.append(f"Акцентные цвета ({', '.join(set(accent))}) задают настроение.")
 
     # Анализ по occasion
-    if occasion_code == "work_office":
+    if occasion_code in ("work_office", "interview"):
         parts.append("Для офиса важна аккуратность силуэта и сдержанность — этот набор не перетягивает внимание.")
+    elif occasion_code == "date":
+        parts.append("На свидание важно выглядеть ухоженно и женственно — этот образ подчёркивает стиль без лишних усилий.")
+    elif occasion_code == "party":
+        parts.append("Для вечеринки образ должен быть запоминающимся, но гармоничным — здесь это соблюдено.")
+    elif occasion_code in ("walk", "sport_travel"):
+        parts.append("Для прогулки нужен комфорт и свобода движений — эти вещи позволяют чувствовать себя легко.")
+    elif occasion_code == "sport_active":
+        parts.append("Спортивный образ — это функциональность плюс стиль. Этот набор выглядит собранно и удобно.")
     elif occasion_code == "going_out":
         parts.append("Для выхода важно выглядеть выразительно, но не перегружено — здесь это соблюдено.")
-    elif occasion_code == "sport_travel":
-        parts.append("Для прогулки нужен комфорт и свобода движений — эти вещи позволяют чувствовать себя легко.")
 
     return "\n\n".join(parts)
 
@@ -422,10 +477,21 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer("Не вижу последний образ для визуализации.")
             return
 
-        await callback.message.answer("Готовлю визуализацию на манекене… Это займёт 15–30 секунд.")
-
         user = await get_or_create_user(callback.from_user.id)
         is_premium = user.get("subscription_status") == "active"
+
+        if not is_premium:
+            await callback.message.answer(
+                "✨ Визуализация на манекене — функция подписки.\n\n"
+                "Хочешь увидеть, как твой образ выглядит на манекене в 2 ракурсах?\n"
+                f"Оформи подписку — {settings.subscription_price} ₽/мес.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
+                ]),
+            )
+            return
+
+        await callback.message.answer("Готовлю визуализацию на манекене… Это займёт 15–30 секунд.")
 
         description = await describe_items_for_mannequin(callback.message.bot, items_payload)
         if not description:

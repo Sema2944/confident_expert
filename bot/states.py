@@ -20,3 +20,4 @@ class BotStates(StatesGroup):
     editing_price = State()
     search_mode = State()
     setting_city = State()
+    check_compatibility = State()

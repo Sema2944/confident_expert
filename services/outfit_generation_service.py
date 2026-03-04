@@ -21,6 +21,11 @@ class OutfitResult:
 
 _OCCASION_PREFER: dict[str, set[str]] = {
     "work_office": {"office", "smart"},
+    "interview": {"office", "smart"},
+    "date": {"smart", "casual"},
+    "party": {"smart", "casual"},
+    "walk": {"casual", "sport"},
+    "sport_active": {"sport"},
     "going_out": {"smart", "casual"},
     "sport_travel": {"sport", "casual"},
     "casual": set(),
@@ -28,6 +33,11 @@ _OCCASION_PREFER: dict[str, set[str]] = {
 
 _OCCASION_EXCLUDE: dict[str, set[str]] = {
     "work_office": {"sport"},
+    "interview": {"sport", "casual"},
+    "date": {"sport"},
+    "party": {"sport"},
+    "walk": {"office"},
+    "sport_active": {"office", "smart"},
     "going_out": {"sport"},
     "sport_travel": {"office"},
     "casual": set(),

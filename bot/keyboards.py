@@ -20,9 +20,9 @@ def menu_keyboard() -> ReplyKeyboardMarkup:
 def occasion_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🏢 Работа/офис")],
-            [KeyboardButton(text="✨ Выход в люди")],
-            [KeyboardButton(text="🎒 Спорт/прогулки")],
+            [KeyboardButton(text="🏢 Работа/офис"), KeyboardButton(text="💼 Собеседование")],
+            [KeyboardButton(text="💕 Свидание"), KeyboardButton(text="🎉 Вечеринка")],
+            [KeyboardButton(text="🚶 Прогулка"), KeyboardButton(text="🏃 Спорт")],
             [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True,

@@ -79,7 +79,7 @@ async def init_storage() -> None:
             )
             """
         )
-        # Миграция: координаты пользователя
+        # Миграция: координаты + конверсия + push
         user_cols = {row["name"] for row in await (await connection.execute("PRAGMA table_info(user_profiles)")).fetchall()}
         if "city" not in user_cols:
             await connection.execute("ALTER TABLE user_profiles ADD COLUMN city TEXT DEFAULT 'Москва'")
@@ -87,6 +87,12 @@ async def init_storage() -> None:
             await connection.execute("ALTER TABLE user_profiles ADD COLUMN lat REAL")
         if "lon" not in user_cols:
             await connection.execute("ALTER TABLE user_profiles ADD COLUMN lon REAL")
+        if "paywall_hit_at" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN paywall_hit_at DATETIME")
+        if "morning_push_enabled" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN morning_push_enabled INTEGER DEFAULT 0")
+        if "morning_push_hour" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN morning_push_hour INTEGER DEFAULT 8")
 
         await connection.commit()
 
@@ -414,3 +420,59 @@ async def set_user_location(user_id: int, city: str, lat: float | None = None, l
             (city, lat, lon, user_id),
         )
         await connection.commit()
+
+
+async def record_paywall_hit(user_id: int) -> None:
+    """Фиксировать момент упёртости в paywall для follow-up."""
+    from datetime import datetime as _dt
+    async with _connect() as connection:
+        await connection.execute(
+            "UPDATE user_profiles SET paywall_hit_at = ? WHERE user_id = ?",
+            (_dt.now().isoformat(), user_id),
+        )
+        await connection.commit()
+
+
+async def get_paywall_followup_users(hours_min: int = 24, hours_max: int = 48) -> list[dict]:
+    """Пользователи, которые упёрлись в paywall hours_min–hours_max часов назад и не оплатили."""
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff_old = (_dt.now() - _td(hours=hours_max)).isoformat()
+    cutoff_new = (_dt.now() - _td(hours=hours_min)).isoformat()
+    async with _connect() as connection:
+        rows = await (await connection.execute(
+            """SELECT user_id FROM user_profiles
+               WHERE paywall_hit_at BETWEEN ? AND ?
+               AND subscription_status != 'active'
+               AND paywall_hit_at IS NOT NULL""",
+            (cutoff_old, cutoff_new),
+        )).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def clear_paywall_hit(user_id: int) -> None:
+    async with _connect() as connection:
+        await connection.execute(
+            "UPDATE user_profiles SET paywall_hit_at = NULL WHERE user_id = ?", (user_id,),
+        )
+        await connection.commit()
+
+
+async def set_morning_push(user_id: int, enabled: bool, hour: int = 8) -> None:
+    async with _connect() as connection:
+        await connection.execute(
+            "UPDATE user_profiles SET morning_push_enabled = ?, morning_push_hour = ? WHERE user_id = ?",
+            (1 if enabled else 0, hour, user_id),
+        )
+        await connection.commit()
+
+
+async def get_morning_push_users(hour: int) -> list[dict]:
+    """Подписчики с активным morning push на указанный час."""
+    async with _connect() as connection:
+        rows = await (await connection.execute(
+            """SELECT user_id, city, lat, lon FROM user_profiles
+               WHERE morning_push_enabled = 1 AND morning_push_hour = ?
+               AND subscription_status = 'active'""",
+            (hour,),
+        )).fetchall()
+        return [dict(r) for r in rows]

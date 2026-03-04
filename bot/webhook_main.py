@@ -69,7 +69,18 @@ async def main() -> None:
             if event_type == "payment.succeeded" and user_id:
                 await activate_subscription(user_id, settings.subscription_days)
                 try:
-                    await bot.send_message(user_id, "✅ Подписка активирована! Теперь у тебя безлимитный доступ ко всем функциям.")
+                    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+                    await bot.send_message(
+                        user_id,
+                        "✅ Подписка активирована!\n\n"
+                        "Хочешь получать готовый образ каждое утро? "
+                        "Я подберу по погоде и твоему расписанию.",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="☀️ Да, присылай в 8:00", callback_data="push:enable:8")],
+                            [InlineKeyboardButton(text="🕐 В другое время", callback_data="push:select_time")],
+                            [InlineKeyboardButton(text="❌ Нет, спасибо", callback_data="push:disable")],
+                        ]),
+                    )
                 except Exception:
                     logging.exception("Failed to send subscription confirmation to user %s", user_id)
             return web.Response(text="OK", status=200)

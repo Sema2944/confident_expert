@@ -101,8 +101,80 @@ async def send_scheduled_post(bot: Bot, post: dict) -> None:
 # ─── Background Loop ──────────────────────────────────────
 
 
+async def _send_paywall_followups(bot: Bot) -> None:
+    """Follow-up тем, кто упёрся в paywall 24–48ч назад и не оплатил."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from config.settings import settings
+    from bot.storage import get_paywall_followup_users, clear_paywall_hit
+
+    users = await get_paywall_followup_users(hours_min=24, hours_max=48)
+    for row in users:
+        try:
+            await bot.send_message(
+                row["user_id"],
+                "👋 Привет! Вчера ты попробовал AI-стилиста — как впечатления?\n\n"
+                "Твой гардероб уже в боте. С подпиской я буду каждый день "
+                "подбирать образы по погоде, показывать на манекене и искать "
+                "похожие вещи в магазинах.\n\n"
+                f"💎 {settings.subscription_price} ₽/мес — попробуй!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
+                ]),
+            )
+            await clear_paywall_hit(row["user_id"])
+        except Exception:
+            logging.exception("Paywall follow-up failed for user %s", row["user_id"])
+
+
+async def _send_morning_outfits(bot: Bot) -> None:
+    """Утренние образы подписчикам."""
+    from aiogram.types import BufferedInputFile
+    from bot.storage import get_morning_push_users, get_items
+    from services.weather_service import detect_season_for_user
+    from services.outfit_generation_service import OutfitService
+    from services.outfit_service import OutfitImageService
+
+    current_hour = datetime.now(MOSCOW_TZ).hour
+    users = await get_morning_push_users(current_hour)
+
+    outfit_svc = OutfitService()
+    image_svc = OutfitImageService()
+
+    for user_data in users:
+        try:
+            user_id = user_data["user_id"]
+            items = await get_items(user_id)
+            if len(items) < 3:
+                continue
+
+            season, weather_msg = await detect_season_for_user(user_id)
+            outfits = await outfit_svc.generate_outfits(
+                items=items, occasion="casual", season=season, count=1, user_id=user_id,
+            )
+            if not outfits:
+                continue
+
+            caption = f"☀️ Доброе утро! {weather_msg}\n\nВот твой образ на сегодня:"
+            collage = await image_svc.render_outfit_image(bot=bot, items_payload=outfits[0].items)
+
+            if collage:
+                await bot.send_photo(
+                    user_id,
+                    photo=BufferedInputFile(collage, "morning.png"),
+                    caption=caption,
+                )
+            else:
+                await bot.send_message(user_id, caption)
+        except Exception:
+            logging.exception("Morning push failed for user %s", user_data["user_id"])
+
+
+_last_hourly_check: int = -1
+
+
 async def scheduler_loop(bot: Bot) -> None:
     logging.info("Scheduler loop started")
+    global _last_hourly_check
     try:
         while True:
             try:
@@ -115,6 +187,14 @@ async def scheduler_loop(bot: Bot) -> None:
                     except Exception as exc:
                         await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
                         logging.exception("Failed to send scheduled post %s", post["id"])
+
+                # Раз в час — morning push + follow-up
+                current_hour = datetime.now(MOSCOW_TZ).hour
+                if current_hour != _last_hourly_check:
+                    _last_hourly_check = current_hour
+                    await _send_morning_outfits(bot)
+                    await _send_paywall_followups(bot)
+
             except Exception:
                 logging.exception("Scheduler loop iteration failed")
 

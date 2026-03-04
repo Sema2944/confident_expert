@@ -6,6 +6,8 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.storage import get_items
+from config.settings import settings
+from services.subscription_service import get_or_create_user
 from services.visual_search_service import build_search_results, describe_item_for_search
 
 router = Router()
@@ -16,6 +18,20 @@ logger = logging.getLogger(__name__)
 async def find_similar_item(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.data or not callback.message:
+        return
+
+    user = await get_or_create_user(callback.from_user.id)
+    is_premium = user.get("subscription_status") == "active"
+
+    if not is_premium:
+        await callback.message.answer(
+            "🔍 Поиск похожих вещей — функция подписки.\n\n"
+            "Я найду похожие вещи в Lamoda, Wildberries и OZON с прямыми ссылками.\n"
+            f"Оформи подписку — {settings.subscription_price} ₽/мес.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
+            ]),
+        )
         return
 
     item_id = int(callback.data.split(":", 1)[1])
