@@ -56,7 +56,10 @@ async def subscription_info(message: Message) -> None:
 
 @router.callback_query(F.data == "pay:subscribe")
 async def pay_subscribe(callback: CallbackQuery) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not callback.message:
         return
 
@@ -82,7 +85,10 @@ async def pay_subscribe(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("push:enable:"))
 async def enable_push(callback: CallbackQuery) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not callback.message:
         return
     hour = int(callback.data.split(":")[2])
@@ -95,7 +101,10 @@ async def enable_push(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "push:select_time")
 async def select_push_time(callback: CallbackQuery) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not callback.message:
         return
     buttons = [
@@ -110,7 +119,10 @@ async def select_push_time(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "push:disable")
 async def disable_push(callback: CallbackQuery) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not callback.message:
         return
     await set_morning_push(callback.from_user.id, enabled=False)

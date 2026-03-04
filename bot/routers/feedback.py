@@ -44,4 +44,7 @@ async def save_feedback(message: Message, state: FSMContext) -> None:
 async def unhandled_callback_query(callback: CallbackQuery) -> None:
     callback_data = callback.data or "<empty>"
     logging.warning("Unhandled callback_query: user_id=%s data=%s", callback.from_user.id, callback_data)
-    await callback.answer("Эта кнопка пока не подключена. Попробуйте открыть меню ещё раз.", show_alert=False)
+    try:
+        await callback.answer("Эта кнопка пока не подключена. Попробуйте открыть меню ещё раз.", show_alert=False)
+    except Exception:
+        pass

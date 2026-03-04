@@ -323,7 +323,10 @@ def _build_why_text(
 
 @router.callback_query(F.data == "outfit:like")
 async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     try:
         data = await state.get_data()
         if not data.get("last_outfit_items_payload"):
@@ -347,7 +350,10 @@ async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "outfit:why")
 async def why_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     try:
         data = await state.get_data()
         items_details = data.get("last_outfit_items_details")
@@ -369,7 +375,10 @@ async def why_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "outfit:reroll")
 async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     try:
         data = await state.get_data()
         last_items = data.get("last_outfit_items_payload")
@@ -475,7 +484,10 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "outfit:visualize")
 async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     try:
         if not callback.message:
             return

@@ -41,6 +41,17 @@ from services.visual_search_service import build_affiliate_link
 router = Router()
 
 
+async def _safe_answer(callback: CallbackQuery, text: str = "", show_alert: bool = False) -> None:
+    """Wrapper around callback.answer() that ignores errors from expired callbacks."""
+    try:
+        if text:
+            await callback.answer(text, show_alert=show_alert)
+        else:
+            await _safe_answer(callback)
+    except Exception:
+        pass
+
+
 def _item_actions_keyboard(item_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -364,7 +375,7 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "ai_confirm")
 async def ai_confirm_handler(callback: CallbackQuery, state: FSMContext) -> None:
     """Пользователь подтвердил AI-результат."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
 
@@ -381,7 +392,7 @@ async def ai_confirm_handler(callback: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(F.data == "ai_manual")
 async def ai_manual_handler(callback: CallbackQuery, state: FSMContext) -> None:
     """Пользователь хочет указать вручную — удаляем AI-запись и запускаем каскад."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
 
@@ -404,7 +415,7 @@ async def ai_manual_handler(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("mcat:"))
 async def manual_category_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Шаг 1: выбрана категория → показать подкатегории."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -420,7 +431,7 @@ async def manual_category_selected(callback: CallbackQuery, state: FSMContext) -
 @router.callback_query(F.data.startswith("msub:"))
 async def manual_subcategory_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Шаг 2: выбрана подкатегория → показать цвета."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -436,7 +447,7 @@ async def manual_subcategory_selected(callback: CallbackQuery, state: FSMContext
 @router.callback_query(F.data.startswith("mcol:"))
 async def manual_color_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Шаг 3: выбран цвет → показать сезоны."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -452,7 +463,7 @@ async def manual_color_selected(callback: CallbackQuery, state: FSMContext) -> N
 @router.callback_query(F.data.startswith("msea:"))
 async def manual_season_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Шаг 4: выбран сезон → показать стили."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -468,7 +479,7 @@ async def manual_season_selected(callback: CallbackQuery, state: FSMContext) -> 
 @router.callback_query(F.data.startswith("mfor:"))
 async def manual_formality_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Шаг 5: выбран стиль → спросить цену."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -556,7 +567,7 @@ async def manual_price_entered(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "mback:category")
 async def manual_back_to_category(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     await state.set_state(BotStates.manual_select_category)
@@ -565,7 +576,7 @@ async def manual_back_to_category(callback: CallbackQuery, state: FSMContext) ->
 
 @router.callback_query(F.data == "mback:subcategory")
 async def manual_back_to_subcategory(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     data = await state.get_data()
@@ -576,7 +587,7 @@ async def manual_back_to_subcategory(callback: CallbackQuery, state: FSMContext)
 
 @router.callback_query(F.data == "mback:color")
 async def manual_back_to_color(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     await state.set_state(BotStates.manual_select_color)
@@ -585,7 +596,7 @@ async def manual_back_to_color(callback: CallbackQuery, state: FSMContext) -> No
 
 @router.callback_query(F.data == "mback:season")
 async def manual_back_to_season(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     await state.set_state(BotStates.manual_select_season)
@@ -612,7 +623,7 @@ async def wardrobe_list(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("item:delete:"))
 async def ask_delete_wardrobe_item(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -625,7 +636,7 @@ async def ask_delete_wardrobe_item(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("item:delete_confirm:"))
 async def delete_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -646,12 +657,12 @@ async def delete_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> No
 
 @router.callback_query(F.data.startswith("item:delete_cancel:"))
 async def cancel_delete_wardrobe_item(callback: CallbackQuery) -> None:
-    await callback.answer("Ок")
+    await _safe_answer(callback, "Ок")
 
 
 @router.callback_query(F.data.startswith("item:rename:"))
 async def request_rename_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -666,7 +677,7 @@ async def request_rename_wardrobe_item(callback: CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data.startswith("item:enhance:"))
 async def enhance_wardrobe_item(callback: CallbackQuery) -> None:
-    await callback.answer("Обрабатываю фото…")
+    await _safe_answer(callback, "Обрабатываю фото…")
     if not callback.data or not callback.message:
         return
 
@@ -704,7 +715,7 @@ async def enhance_wardrobe_item(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("set_price:"))
 async def request_set_price(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.data or not callback.message:
         return
 
@@ -789,7 +800,7 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "outfit:quick_first")
 async def quick_first_outfit(callback: CallbackQuery, state: FSMContext) -> None:
     """Собрать образ из того, что есть (даже 2 вещи без обуви)."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     items = await get_items(callback.from_user.id)
@@ -814,7 +825,7 @@ async def quick_first_outfit(callback: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(F.data == "continue_upload")
 async def continue_upload_handler(callback: CallbackQuery, state: FSMContext) -> None:
     """Пользователь хочет добавить ещё вещи перед первым образом."""
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     await state.set_state(BotStates.upload_photos)
@@ -865,7 +876,7 @@ async def _show_items_page(message: Message, items: list[dict], label: str, page
 
 @router.callback_query(F.data.startswith("wfilter:"))
 async def wardrobe_filter(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     user_id = callback.from_user.id
@@ -893,7 +904,7 @@ async def wardrobe_filter(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("wsort:"))
 async def wardrobe_sort(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await _safe_answer(callback)
     if not callback.message:
         return
     items = await get_items(callback.from_user.id)

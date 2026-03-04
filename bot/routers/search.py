@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 @router.callback_query(F.data.startswith("find_similar:"))
 async def find_similar_item(callback: CallbackQuery) -> None:
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not callback.data or not callback.message:
         return
 
