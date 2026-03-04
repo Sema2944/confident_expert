@@ -59,9 +59,9 @@ async def get_current_temperature(lat: float, lon: float) -> float | None:
 
 def temperature_to_season(temp: float) -> str:
     """Маппинг температуры → сезон для подбора одежды."""
-    if temp <= 0:
+    if temp < 5:
         return "winter"
-    elif temp <= 15:
+    elif temp <= 17:
         return "demi"
     else:
         return "summer"

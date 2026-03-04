@@ -321,7 +321,36 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
         await state.update_data(ai_saved_item_id=item_id)
 
         summary = build_russian_item_summary(category=category, analysis=analysis)
-        await message.answer(summary, reply_markup=confirm_ai_keyboard())
+
+        # Генерируем карточку вещи в Pinterest-стиле
+        try:
+            from services.item_card_service import ItemCardService
+            cat_label = CATEGORY_LABELS_RU.get(category, "")
+            parts = cat_label.split(" ", 1)
+            cat_emoji = parts[0] if len(parts) == 2 else ""
+            type_name = (
+                analysis.type
+                if analysis.type and analysis.type != "unknown"
+                else (parts[1] if len(parts) == 2 else cat_label)
+            )
+            display_type = f"{cat_emoji} {type_name}".strip()
+
+            photo_img = Image.open(BytesIO(image_bytes))
+            card_bytes = ItemCardService().render_card(
+                photo=photo_img,
+                item_type=display_type,
+                color=analysis.primary_color or "",
+                style=analysis.formality or "",
+                season=analysis.season or "",
+            )
+            await message.answer_photo(
+                BufferedInputFile(card_bytes, filename="item_card.jpg"),
+                caption=summary,
+                reply_markup=confirm_ai_keyboard(),
+            )
+        except Exception:
+            logging.exception("Item card generation failed, sending text fallback")
+            await message.answer(summary, reply_markup=confirm_ai_keyboard())
     else:
         # AI не распознал — сразу каскад ручной классификации
         await message.answer(
