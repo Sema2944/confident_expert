@@ -127,6 +127,14 @@ def _filter_items_for_context(
             if cat in ("bottom", "onepiece") and item not in filtered:
                 filtered.append(item)
 
+    # Зима: верхняя одежда обязательна — добавляем даже если сезон не совпадает
+    if season == "winter":
+        filtered_cats = {normalize_category(i.get("category")) for i in filtered}
+        if "outerwear" not in filtered_cats:
+            for item in items:
+                if normalize_category(item.get("category")) == "outerwear" and item not in filtered:
+                    filtered.append(item)
+
     return filtered
 
 
@@ -425,6 +433,9 @@ class OutfitService:
                     continue
 
                 score = _color_compatibility_score(outfit_items)
+                # Winter bonus: prioritize outfits with outerwear
+                if season == "winter" and result.items.get("outerwear"):
+                    score += 0.5
                 if score > best_score:
                     best_score = score
                     best_result = result

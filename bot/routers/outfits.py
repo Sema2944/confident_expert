@@ -9,6 +9,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton
 from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard, season_keyboard
 from bot.storage import get_items, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
+from config.categories import normalize_category
 from config.settings import settings
 from bot.states import BotStates
 from services.image_service import ImageService
@@ -160,6 +161,12 @@ async def _generate_and_show_outfit(
         await state.set_state(BotStates.menu)
         return
 
+    # Для зимы: проверяем наличие верхней одежды в гардеробе
+    no_outerwear_warning = (
+        season == "winter"
+        and not any(normalize_category(item.get("category")) == "outerwear" for item in items)
+    )
+
     shown_count = 0
     for outfit in outfits:
         title = OCCASION_TITLES.get(occasion_code, "Образ")
@@ -182,6 +189,12 @@ async def _generate_and_show_outfit(
             await message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
             for file_id in outfit_file_ids:
                 await message.answer_photo(photo=file_id)
+
+        if no_outerwear_warning:
+            await message.answer(
+                "⚠️ В гардеробе нет тёплой верхней одежды. "
+                "Добавь пальто, куртку или пуховик — и образы станут теплее!"
+            )
 
         shown_count += 1
         # Собираем детали вещей для «Почему так»

@@ -160,5 +160,81 @@ class ColorScoringTests(unittest.TestCase):
         self.assertEqual(_color_compatibility_score(items), 1.0)
 
 
+class WinterOuterwearTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for winter outerwear priority logic."""
+
+    async def test_winter_outfit_includes_outerwear_when_present(self) -> None:
+        """Outerwear must be included in winter outfits when available in wardrobe."""
+        service = OutfitService()
+        items = [
+            {"category": "top", "telegram_file_id": "top-1", "season": "all", "formality": "casual"},
+            {"category": "bottom", "telegram_file_id": "bottom-1", "season": "all", "formality": "casual"},
+            {"category": "shoes", "telegram_file_id": "shoe-1", "season": "all", "formality": "casual"},
+            {"category": "outerwear", "telegram_file_id": "coat-1", "season": "winter", "formality": "casual"},
+        ]
+        outfits = await service.generate_outfits(items=items, occasion="walk", season="winter", count=1)
+
+        self.assertEqual(len(outfits), 1)
+        self.assertEqual(outfits[0].items["outerwear"], ["coat-1"])
+
+    async def test_winter_outfit_includes_outerwear_with_mismatched_season(self) -> None:
+        """Outerwear with non-winter season tag is still force-included for winter outfits."""
+        service = OutfitService()
+        items = [
+            {"category": "top", "telegram_file_id": "top-1", "season": "all", "formality": "casual"},
+            {"category": "bottom", "telegram_file_id": "bottom-1", "season": "all", "formality": "casual"},
+            {"category": "shoes", "telegram_file_id": "shoe-1", "season": "all", "formality": "casual"},
+            # outerwear has wrong season tag — should still appear in winter outfit
+            {"category": "outerwear", "telegram_file_id": "coat-1", "season": "summer", "formality": "casual"},
+        ]
+        outfits = await service.generate_outfits(items=items, occasion="walk", season="winter", count=1)
+
+        self.assertEqual(len(outfits), 1)
+        self.assertEqual(outfits[0].items["outerwear"], ["coat-1"])
+
+
+class WinterOuterwearFilterTests(unittest.TestCase):
+    """Tests for _filter_items_for_context winter outerwear fallback."""
+
+    def _make_item(self, category: str, season: str = "all", formality: str = "casual") -> dict:
+        return {"category": category, "season": season, "formality": formality, "telegram_file_id": f"{category}-1"}
+
+    def test_winter_includes_outerwear_with_summer_season_tag(self) -> None:
+        """Outerwear filtered by season is added back for winter."""
+        items = [
+            self._make_item("top", season="all"),
+            self._make_item("bottom", season="all"),
+            self._make_item("shoes", season="all"),
+            self._make_item("outerwear", season="summer"),  # would normally be excluded
+        ]
+        filtered = _filter_items_for_context(items, occasion="casual", season="winter")
+        categories = {i["category"] for i in filtered}
+        self.assertIn("outerwear", categories)
+
+    def test_winter_includes_outerwear_already_matching(self) -> None:
+        """Outerwear with winter season tag stays in filtered for winter."""
+        items = [
+            self._make_item("top", season="all"),
+            self._make_item("bottom", season="all"),
+            self._make_item("shoes", season="all"),
+            self._make_item("outerwear", season="winter"),
+        ]
+        filtered = _filter_items_for_context(items, occasion="casual", season="winter")
+        categories = {i["category"] for i in filtered}
+        self.assertIn("outerwear", categories)
+
+    def test_non_winter_does_not_force_summer_outerwear(self) -> None:
+        """Summer season does not apply winter outerwear fallback."""
+        items = [
+            self._make_item("top", season="summer"),
+            self._make_item("bottom", season="summer"),
+            self._make_item("shoes", season="all"),
+            self._make_item("outerwear", season="winter"),  # excluded in summer
+        ]
+        filtered = _filter_items_for_context(items, occasion="casual", season="summer")
+        categories = {i["category"] for i in filtered}
+        self.assertNotIn("outerwear", categories)
+
+
 if __name__ == "__main__":
     unittest.main()
