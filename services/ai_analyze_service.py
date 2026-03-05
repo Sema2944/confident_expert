@@ -18,6 +18,7 @@ class ItemAnalysis:
     season: str | None = None
     formality: str | None = None
     gender_hint: str | None = None
+    photo_quality: str | None = None
 
 
 class AIAnalyzeService:
@@ -25,6 +26,7 @@ class AIAnalyzeService:
     _SEASON_VALUES = {"winter", "demi", "summer", "all", "unknown"}
     _FORMALITY_VALUES = {"sport", "casual", "smart", "office", "unknown"}
     _GENDER_VALUES = {"female", "male", "unisex", "unknown"}
+    _PHOTO_QUALITY_VALUES = {"good", "poor", "unclear"}
 
     async def analyze(self, image_bytes: bytes) -> ItemAnalysis:
         if not settings.ai_api_key:
@@ -120,6 +122,7 @@ class AIAnalyzeService:
             season=self._normalize_enum(payload.get("season"), self._SEASON_VALUES),
             formality=self._normalize_enum(payload.get("formality"), self._FORMALITY_VALUES),
             gender_hint=self._normalize_enum(payload.get("gender_hint"), self._GENDER_VALUES),
+            photo_quality=self._normalize_enum(payload.get("photo_quality"), self._PHOTO_QUALITY_VALUES),
         )
 
     @staticmethod
@@ -148,6 +151,7 @@ class AIAnalyzeService:
             season="unknown",
             formality="unknown",
             gender_hint="unknown",
+            photo_quality="good",
         )
 
 

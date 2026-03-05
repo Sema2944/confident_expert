@@ -16,7 +16,8 @@ Return JSON in EXACT format:
   "pattern": "solid|stripe|check|print|unknown",
   "season": "winter|demi|summer|all|unknown",
   "formality": "sport|casual|smart|office|unknown",
-  "gender_hint": "female|male|unisex|unknown"
+  "gender_hint": "female|male|unisex|unknown",
+  "photo_quality": "good|poor|unclear"
 }
 
 Rules:
@@ -25,3 +26,4 @@ Rules:
 - Do NOT guess brands.
 - If the image is ambiguous, prefer "unknown" rather than inventing details.
 - If the item looks usable by any gender, set gender_hint to "unisex".
+- photo_quality: "good" = item is clearly visible, color and type are determinable; "poor" = photo is dark, blurry, item is crumpled, bad angle, or multiple items in frame; "unclear" = cannot determine if this is clothing at all, or the image is incomprehensible.

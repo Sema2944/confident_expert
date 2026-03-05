@@ -262,7 +262,26 @@ async def set_category(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(category=category)
     await state.set_state(BotStates.upload_photos)
-    await message.answer("Пришлите фото вещи.", reply_markup=photo_upload_keyboard())
+
+    items = await get_items(message.from_user.id)
+    if not items:
+        await message.answer(
+            "📸 Совет: как фоткать вещи\n\n"
+            "Лучший способ — разложи вещь ровно на полу или кровати и сфоткай сверху. "
+            "Так бот точнее определит цвет и стиль.\n\n"
+            "✅ Хорошо:\n"
+            "- Ровно разложена на светлом фоне\n"
+            "- Одна вещь — одно фото\n"
+            "- Хорошее освещение\n\n"
+            "❌ Плохо:\n"
+            "- Скомканная / в шкафу\n"
+            "- Тёмное фото\n"
+            "- Несколько вещей сразу\n\n"
+            "Отправляй фото 👇",
+            reply_markup=photo_upload_keyboard(),
+        )
+    else:
+        await message.answer("Пришлите фото вещи.", reply_markup=photo_upload_keyboard())
 
 
 @router.message(BotStates.upload_photos, F.photo)
@@ -292,6 +311,17 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
 
     analyzer = AIAnalyzeService()
     analysis = await analyzer.analyze(image_bytes=image_bytes)
+
+    # Photo quality gate
+    if analysis.photo_quality == "unclear":
+        await message.answer(
+            "🤔 Не удалось понять что на фото. Попробуй:\n"
+            "- Сфоткать только одну вещь\n"
+            "- Разложить ровно на полу\n"
+            "- При хорошем освещении",
+            reply_markup=photo_upload_keyboard(),
+        )
+        return
 
     ai_success = any(
         value and value != "unknown"
@@ -332,6 +362,13 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
         await state.update_data(ai_saved_item_id=item_id)
 
         summary = build_russian_item_summary(category=category, analysis=analysis)
+
+        if analysis.photo_quality == "poor":
+            await message.answer(
+                "📸 Фото не очень чёткое — бот мог ошибиться с цветом или типом.\n\n"
+                "Совет: разложи вещь ровно на светлом фоне и сфоткай сверху. "
+                "Но если всё верно — просто подтверди 👇"
+            )
 
         # Генерируем карточку вещи в Pinterest-стиле
         try:
