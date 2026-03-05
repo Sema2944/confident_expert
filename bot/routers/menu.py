@@ -17,6 +17,18 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     from services.subscription_service import get_or_create_user
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
 
+    from bot.storage import is_first_start
+    if await is_first_start(message.from_user.id):
+        try:
+            from services.admin_notify_service import AdminNotifyService
+            username = f"@{message.from_user.username}" if message.from_user.username else str(message.from_user.id)
+            await AdminNotifyService.notify(
+                message.bot,
+                f"👤 <b>Новый пользователь</b>\n{username} (id: {message.from_user.id})",
+            )
+        except Exception:
+            pass
+
     city, lat, lon = await get_user_location(message.from_user.id)
 
     # Первый запуск — нет координат и город дефолтный

@@ -98,6 +98,16 @@ async def main() -> None:
                     )
                 except Exception:
                     logging.exception("Failed to send subscription confirmation to user %s", user_id)
+                try:
+                    from services.admin_notify_service import AdminNotifyService
+                    from bot.storage import increment_daily_stat
+                    await increment_daily_stat("new_subscriptions")
+                    await AdminNotifyService.notify(
+                        bot,
+                        f"💎 <b>Новая подписка</b>\nПользователь {user_id} оформил подписку на {settings.subscription_days} дней",
+                    )
+                except Exception:
+                    logging.exception("Failed to send admin payment notification")
             return web.Response(text="OK", status=200)
         except Exception:
             logging.exception("YooKassa webhook error")

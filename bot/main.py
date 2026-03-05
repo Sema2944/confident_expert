@@ -2,8 +2,9 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import ErrorEvent
 
-from bot.routers import feedback, menu, outfits, payment, search, subscription, trends, voice, wardrobe
+from bot.routers import feedback, menu, outfits, payment, search, subscription, survey, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.storage import init_storage
 from config.logging import setup_logging
@@ -21,7 +22,25 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.include_router(subscription.router)
     dispatcher.include_router(search.router)
     dispatcher.include_router(voice.router)
+    # survey must be before feedback (feedback has catch-all callback handler)
+    dispatcher.include_router(survey.router)
     dispatcher.include_router(feedback.router)
+
+    @dispatcher.error()
+    async def global_error_handler(event: ErrorEvent, bot: Bot) -> None:
+        logging.exception("Unhandled error: %s", event.exception)
+        try:
+            from services.admin_notify_service import AdminNotifyService
+            from bot.storage import increment_daily_stat
+            await increment_daily_stat("errors_count")
+            error_text = (
+                f"🔴 <b>Ошибка</b>\n"
+                f"{type(event.exception).__name__}: {str(event.exception)[:300]}"
+            )
+            await AdminNotifyService.notify(bot, error_text)
+        except Exception:
+            pass
+
     return dispatcher
 
 

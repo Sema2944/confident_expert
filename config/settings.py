@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     subscription_days: int = 30
     admitad_uid: str = ""
     replicate_api_token: str | None = None
+    admin_id: int = 0
 
 
 settings = Settings()

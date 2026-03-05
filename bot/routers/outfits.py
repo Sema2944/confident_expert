@@ -228,8 +228,8 @@ async def _generate_and_show_outfit(
         # Тизеры для free-пользователей
         user = await get_or_create_user(message.from_user.id)
         is_premium = user.get("subscription_status") == "active"
+        count = user.get("outfit_requests_count", 0) + 1  # +1 т.к. increment ещё не отразился в объекте
         if not is_premium:
-            count = user.get("outfit_requests_count", 0) + 1  # +1 т.к. increment ещё не отразился в объекте
             if count == 1:
                 await message.answer(
                     "💎 Кстати, с подпиской я могу показать этот образ "
@@ -252,6 +252,14 @@ async def _generate_and_show_outfit(
                         )],
                     ]),
                 )
+
+        # Опрос после каждого 3-го образа
+        if count > 0 and count % 3 == 0:
+            try:
+                from bot.routers.survey import show_survey_if_eligible
+                await show_survey_if_eligible(message.bot, message.from_user.id)
+            except Exception:
+                logging.exception("Failed to show survey after outfit")
 
 
 _NEUTRAL_COLORS = {
@@ -357,6 +365,12 @@ async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             )
             await callback.message.answer("Отлично. Я буду учитывать это при следующих подборках.", reply_markup=menu_keyboard())
             await _log_outfit_event("outfit_like", callback.message)
+            # Опрос после первого лайка
+            try:
+                from bot.routers.survey import show_survey_if_eligible
+                await show_survey_if_eligible(callback.message.bot, callback.from_user.id)
+            except Exception:
+                logging.exception("Failed to show survey after like")
     except Exception:
         logging.exception("Failed to handle outfit like callback")
 

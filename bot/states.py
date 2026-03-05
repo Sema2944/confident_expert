@@ -11,6 +11,7 @@ class BotStates(StatesGroup):
     generating = State()
     subscription = State()
     feedback_waiting_text = State()
+    survey_waiting_text = State()
     manual_select_category = State()
     manual_select_subcategory = State()
     manual_select_color = State()

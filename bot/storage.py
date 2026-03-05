@@ -111,6 +111,33 @@ async def init_storage() -> None:
             "CREATE INDEX IF NOT EXISTS idx_outfit_history_user_date ON outfit_history (user_id, created_at)"
         )
 
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS survey_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                rating INTEGER,
+                most_valuable TEXT,
+                free_text TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_stats (
+                date TEXT PRIMARY KEY,
+                new_subscriptions INTEGER DEFAULT 0,
+                errors_count INTEGER DEFAULT 0
+            )
+            """
+        )
+
+        # Миграция: survey_shown_at для user_profiles
+        if "survey_shown_at" not in user_cols:
+            await connection.execute("ALTER TABLE user_profiles ADD COLUMN survey_shown_at DATETIME")
+
         await connection.commit()
 
 
@@ -546,3 +573,118 @@ async def get_recent_outfit_item_ids(user_id: int, days: int = 3) -> set[str]:
     for entry in history:
         used.update(entry["outfit_items"])
     return used
+
+
+# ─── Survey ─────────────────────────────────────────────────
+
+
+async def save_survey_feedback(
+    user_id: int,
+    rating: int | None,
+    most_valuable: str | None,
+    free_text: str | None,
+) -> None:
+    async with _connect() as connection:
+        await connection.execute(
+            "INSERT INTO survey_feedback (user_id, rating, most_valuable, free_text) VALUES (?, ?, ?, ?)",
+            (user_id, rating, most_valuable, free_text),
+        )
+        await connection.commit()
+
+
+async def should_show_survey(user_id: int, days: int = 7) -> bool:
+    """True если опрос не показывался пользователю последние N дней."""
+    async with _connect() as connection:
+        row = await (await connection.execute(
+            "SELECT survey_shown_at FROM user_profiles WHERE user_id = ?", (user_id,),
+        )).fetchone()
+    if not row or row["survey_shown_at"] is None:
+        return True
+    from datetime import datetime as _dt
+    try:
+        shown = _dt.fromisoformat(row["survey_shown_at"])
+        delta = (_dt.now() - shown).total_seconds()
+        return delta > days * 86400
+    except Exception:
+        return True
+
+
+async def update_survey_shown_at(user_id: int) -> None:
+    from datetime import datetime as _dt
+    async with _connect() as connection:
+        await connection.execute(
+            "UPDATE user_profiles SET survey_shown_at = ? WHERE user_id = ?",
+            (_dt.now().isoformat(), user_id),
+        )
+        await connection.commit()
+
+
+async def is_first_start(user_id: int) -> bool:
+    """True если пользователь создан менее 5 минут назад."""
+    async with _connect() as connection:
+        row = await (await connection.execute(
+            "SELECT created_at FROM user_profiles WHERE user_id = ?", (user_id,),
+        )).fetchone()
+    if not row:
+        return False
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        created = _dt.fromisoformat(row["created_at"])
+        # SQLite CURRENT_TIMESTAMP is UTC without tzinfo
+        now = _dt.now()
+        delta = (now - created).total_seconds()
+        return delta < 300
+    except Exception:
+        return False
+
+
+# ─── Daily Stats ─────────────────────────────────────────────
+
+
+_ALLOWED_STATS = {"new_subscriptions", "errors_count"}
+
+
+async def increment_daily_stat(stat_name: str) -> None:
+    if stat_name not in _ALLOWED_STATS:
+        return
+    async with _connect() as connection:
+        await connection.execute(
+            f"""
+            INSERT INTO daily_stats (date, {stat_name})
+            VALUES (date('now'), 1)
+            ON CONFLICT(date) DO UPDATE SET {stat_name} = {stat_name} + 1
+            """,
+        )
+        await connection.commit()
+
+
+async def get_stats_for_daily_report() -> dict:
+    async with _connect() as connection:
+        new_users = (await (await connection.execute(
+            "SELECT COUNT(*) as cnt FROM user_profiles WHERE date(created_at) = date('now')"
+        )).fetchone())["cnt"] or 0
+
+        total_users = (await (await connection.execute(
+            "SELECT COUNT(*) as cnt FROM user_profiles"
+        )).fetchone())["cnt"] or 0
+
+        items_uploaded = (await (await connection.execute(
+            "SELECT COUNT(*) as cnt FROM wardrobe_items WHERE date(created_at) = date('now')"
+        )).fetchone())["cnt"] or 0
+
+        outfit_requests = (await (await connection.execute(
+            "SELECT COUNT(*) as cnt FROM outfit_history WHERE date(created_at) = date('now')"
+        )).fetchone())["cnt"] or 0
+
+        today_row = await (await connection.execute(
+            "SELECT new_subscriptions, errors_count FROM daily_stats WHERE date = date('now')"
+        )).fetchone()
+
+    return {
+        "new_users": new_users,
+        "total_users": total_users,
+        "items_uploaded": items_uploaded,
+        "outfit_requests": outfit_requests,
+        "new_subscriptions": today_row["new_subscriptions"] if today_row else 0,
+        "errors_count": today_row["errors_count"] if today_row else 0,
+    }

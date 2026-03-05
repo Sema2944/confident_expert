@@ -169,6 +169,28 @@ async def _send_morning_outfits(bot: Bot) -> None:
             logging.exception("Morning push failed for user %s", user_data["user_id"])
 
 
+async def _send_daily_stats_report(bot: Bot) -> None:
+    """Ежедневный отчёт статистики для администратора."""
+    from config.settings import settings
+    if not settings.admin_id:
+        return
+    try:
+        from bot.storage import get_stats_for_daily_report
+        stats = await get_stats_for_daily_report()
+        text = (
+            "📈 <b>Статистика за сегодня</b>\n\n"
+            f"👤 Новых пользователей: {stats['new_users']}\n"
+            f"👥 Всего пользователей: {stats['total_users']}\n"
+            f"👗 Вещей добавлено: {stats['items_uploaded']}\n"
+            f"✨ Образов создано: {stats['outfit_requests']}\n"
+            f"💎 Новых подписок: {stats['new_subscriptions']}\n"
+            f"🔴 Ошибок: {stats['errors_count']}"
+        )
+        await bot.send_message(settings.admin_id, text, parse_mode="HTML")
+    except Exception:
+        logging.exception("Failed to send daily stats report")
+
+
 _last_hourly_check: int = -1
 
 
@@ -188,12 +210,14 @@ async def scheduler_loop(bot: Bot) -> None:
                         await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
                         logging.exception("Failed to send scheduled post %s", post["id"])
 
-                # Раз в час — morning push + follow-up
+                # Раз в час — morning push + follow-up + дневная статистика
                 current_hour = datetime.now(MOSCOW_TZ).hour
                 if current_hour != _last_hourly_check:
                     _last_hourly_check = current_hour
                     await _send_morning_outfits(bot)
                     await _send_paywall_followups(bot)
+                    if current_hour == 21:
+                        await _send_daily_stats_report(bot)
 
             except Exception:
                 logging.exception("Scheduler loop iteration failed")
