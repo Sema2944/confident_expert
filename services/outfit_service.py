@@ -44,7 +44,13 @@ class OutfitImageService:
             return None
 
     @staticmethod
-    def _compose_outfit(category_images, template_name: str):
+    def _compose_outfit(category_images, template_name: str = "outfit_story"):
+        # Auto-select layout based on outfit composition
+        if "outerwear" in category_images:
+            template_name = "outfit_story_outerwear"
+        else:
+            template_name = "outfit_story"
+
         template_images = {}
         if category_images.get("dress") is not None:
             template_images["dress"] = category_images["dress"]

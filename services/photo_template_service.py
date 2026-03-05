@@ -56,6 +56,17 @@ class PhotoTemplateService:
                 "slot_4": PhotoSlot(720, 720, 640, 640),
             },
         ),
+        "outfit_story_outerwear": PhotoTemplate(
+            canvas_width=1800,
+            canvas_height=2304,
+            slots={
+                "outerwear":   PhotoSlot(40, 140, 800, 1200),   # left, large
+                "top":         PhotoSlot(900, 140, 760, 680),    # right top
+                "bottom":      PhotoSlot(900, 860, 760, 800),    # right middle
+                "shoes":       PhotoSlot(940, 1700, 680, 360),   # right bottom
+                "accessories": PhotoSlot(40, 1400, 400, 400),    # below outerwear
+            },
+        ),
     }
 
     @classmethod

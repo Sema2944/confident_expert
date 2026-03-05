@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from services.outfit_service import OutfitImageService
 
@@ -42,6 +42,52 @@ class OutfitImageServiceTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsNone(result)
+
+
+class ComposeOutfitTemplateSelectionTests(unittest.TestCase):
+    """Tests for auto template selection in _compose_outfit."""
+
+    def _fake_image(self):
+        return object()
+
+    def test_selects_outerwear_template_when_outerwear_present(self) -> None:
+        category_images = {
+            "outerwear": self._fake_image(),
+            "top": self._fake_image(),
+            "bottom": self._fake_image(),
+            "shoes": self._fake_image(),
+        }
+        with patch("services.outfit_service.PhotoTemplateService.compose") as compose_mock:
+            compose_mock.return_value = MagicMock()
+            OutfitImageService._compose_outfit(category_images)
+
+        _, kwargs = compose_mock.call_args
+        self.assertEqual(kwargs.get("template_name"), "outfit_story_outerwear")
+
+    def test_selects_standard_template_when_no_outerwear(self) -> None:
+        category_images = {
+            "top": self._fake_image(),
+            "bottom": self._fake_image(),
+            "shoes": self._fake_image(),
+        }
+        with patch("services.outfit_service.PhotoTemplateService.compose") as compose_mock:
+            compose_mock.return_value = MagicMock()
+            OutfitImageService._compose_outfit(category_images)
+
+        _, kwargs = compose_mock.call_args
+        self.assertEqual(kwargs.get("template_name"), "outfit_story")
+
+    def test_dress_outfit_without_outerwear_uses_standard_template(self) -> None:
+        category_images = {
+            "dress": self._fake_image(),
+            "shoes": self._fake_image(),
+        }
+        with patch("services.outfit_service.PhotoTemplateService.compose") as compose_mock:
+            compose_mock.return_value = MagicMock()
+            OutfitImageService._compose_outfit(category_images)
+
+        _, kwargs = compose_mock.call_args
+        self.assertEqual(kwargs.get("template_name"), "outfit_story")
 
 
 if __name__ == "__main__":
