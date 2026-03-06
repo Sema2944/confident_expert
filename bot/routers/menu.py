@@ -14,8 +14,12 @@ router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    from services.subscription_service import get_or_create_user
+    from services.subscription_service import get_or_create_user, activate_subscription
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
+
+    from config.settings import settings
+    if settings.admin_id and message.from_user.id == settings.admin_id:
+        await activate_subscription(message.from_user.id, 365)
 
     from bot.storage import is_first_start
     if await is_first_start(message.from_user.id):
@@ -117,3 +121,13 @@ async def cmd_menu(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(HELP_MESSAGE)
+
+
+@router.message(Command("admin_premium"))
+async def admin_premium(message: Message) -> None:
+    from config.settings import settings
+    if not settings.admin_id or message.from_user.id != settings.admin_id:
+        return
+    from services.subscription_service import activate_subscription
+    await activate_subscription(message.from_user.id, 365)
+    await message.answer("✅ Премиум на 365 дней активирован.")
