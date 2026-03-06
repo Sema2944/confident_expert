@@ -170,6 +170,47 @@ def wardrobe_filter_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def after_upload_keyboard() -> InlineKeyboardMarkup:
+    """После подтверждения загрузки вещи: добавить ещё / образ / гардероб."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📸 Добавить ещё", callback_data="action:upload"),
+            InlineKeyboardButton(text="✨ Собрать образ", callback_data="action:outfit"),
+        ],
+        [
+            InlineKeyboardButton(text="👗 Мой гардероб", callback_data="action:wardrobe"),
+        ],
+    ])
+
+
+def after_like_keyboard() -> InlineKeyboardMarkup:
+    """После лайка образа: ещё на тот же повод / другой повод / добавить вещь / меню."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Ещё на этот повод", callback_data="action:reroll_same"),
+            InlineKeyboardButton(text="👗 Другой повод", callback_data="action:outfit"),
+        ],
+        [
+            InlineKeyboardButton(text="📸 Добавить вещь", callback_data="action:upload"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+        ],
+    ])
+
+
+def after_why_keyboard() -> InlineKeyboardMarkup:
+    """После объяснения «Почему так»: те же реакции + другой повод + меню."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👍 Нравится", callback_data="outfit:like"),
+            InlineKeyboardButton(text="🔄 Другой вариант", callback_data="outfit:reroll"),
+        ],
+        [
+            InlineKeyboardButton(text="👗 Другой повод", callback_data="action:outfit"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+        ],
+    ])
+
+
 def location_request_keyboard() -> ReplyKeyboardMarkup:
     """Клавиатура с кнопкой геолокации + текстовый ввод."""
     return ReplyKeyboardMarkup(

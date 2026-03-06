@@ -6,7 +6,10 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.keyboards import menu_keyboard, occasion_keyboard, outfit_reaction_keyboard, season_keyboard
+from bot.keyboards import (
+    after_like_keyboard, after_why_keyboard, menu_keyboard,
+    occasion_keyboard, outfit_reaction_keyboard, season_keyboard,
+)
 from bot.storage import get_items, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
 from config.categories import normalize_category
@@ -363,7 +366,10 @@ async def like_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 action="like",
                 items=data["last_outfit_items_payload"],
             )
-            await callback.message.answer("Отлично. Я буду учитывать это при следующих подборках.", reply_markup=menu_keyboard())
+            await callback.message.answer(
+                "Отлично! Я буду учитывать это при следующих подборках.",
+                reply_markup=after_like_keyboard(),
+            )
             await _log_outfit_event("outfit_like", callback.message)
             # Опрос после первого лайка
             try:
@@ -393,7 +399,7 @@ async def why_outfit(callback: CallbackQuery, state: FSMContext) -> None:
         if callback.message:
             await callback.message.answer(
                 _build_why_text(items_details, occasion_code),
-                reply_markup=outfit_reaction_keyboard(),
+                reply_markup=after_why_keyboard(),
             )
             await _log_outfit_event("outfit_why", callback.message)
     except Exception:
@@ -675,3 +681,54 @@ async def cmd_outfit_history(message: Message) -> None:
         lines.append(f"{i}. {date} — {occasion}, {items_count} вещей{liked}")
 
     await message.answer("\n".join(lines))
+
+
+# ── Контекстные action-кнопки ────────────────────────────────────
+
+
+@router.callback_query(F.data == "action:outfit")
+async def action_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    await state.set_state(BotStates.request_occasion)
+    if callback.message:
+        await callback.message.answer(
+            "Куда ты сегодня идёшь?\n"
+            "Я подберу вариант, который будет уместным и уверенным.",
+            reply_markup=occasion_keyboard(),
+        )
+
+
+@router.callback_query(F.data == "action:menu")
+async def action_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    await state.set_state(BotStates.menu)
+    if callback.message:
+        await callback.message.answer("Меню", reply_markup=menu_keyboard())
+
+
+@router.callback_query(F.data == "action:reroll_same")
+async def action_reroll_same(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    data = await state.get_data()
+    occasion_code = data.get("last_occasion_code", "casual")
+    await callback.message.answer("Собираю ещё один вариант…")
+    from services.weather_service import detect_season_for_user
+    season, _ = await detect_season_for_user(callback.from_user.id)
+    await _generate_and_show_outfit(
+        message=callback.message,
+        state=state,
+        occasion_code=occasion_code,
+        season=season,
+        count=1,
+    )

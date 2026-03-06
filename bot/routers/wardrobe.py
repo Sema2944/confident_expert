@@ -15,9 +15,9 @@ from aiogram.types import (
 from PIL import Image
 
 from bot.keyboards import (
-    category_keyboard, menu_keyboard, photo_upload_keyboard, wardrobe_view_keyboard,
-    confirm_ai_keyboard, manual_category_keyboard, subcategory_keyboard,
-    color_keyboard, season_inline_keyboard, formality_keyboard,
+    after_upload_keyboard, category_keyboard, menu_keyboard, photo_upload_keyboard,
+    wardrobe_view_keyboard, confirm_ai_keyboard, manual_category_keyboard,
+    subcategory_keyboard, color_keyboard, season_inline_keyboard, formality_keyboard,
     wardrobe_filter_keyboard,
 )
 from config.settings import settings
@@ -420,10 +420,7 @@ async def ai_confirm_handler(callback: CallbackQuery, state: FSMContext) -> None
 
     await _check_first_outfit_trigger(callback.message, callback.from_user.id)
 
-    await callback.message.answer(
-        "Отправьте следующее фото или нажмите ⬅️ Назад.",
-        reply_markup=photo_upload_keyboard(),
-    )
+    await callback.message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 
 
 @router.callback_query(F.data == "ai_manual")
@@ -593,10 +590,7 @@ async def manual_price_entered(message: Message, state: FSMContext) -> None:
     await _check_first_outfit_trigger(message, message.from_user.id)
 
     await state.set_state(BotStates.upload_photos)
-    await message.answer(
-        "Отправьте следующее фото или нажмите ⬅️ Назад.",
-        reply_markup=photo_upload_keyboard(),
-    )
+    await message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 
 
 # ── Кнопки «Назад» в каскаде ────────────────────────────────────
@@ -829,6 +823,37 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
 
     await message.answer("Название обновлено.")
     await _render_wardrobe_cards(message, message.from_user.id)
+
+
+# ── Контекстные action-кнопки ────────────────────────────────────
+
+
+@router.callback_query(F.data == "action:upload")
+async def action_upload(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    await state.set_state(BotStates.upload_category)
+    await callback.message.answer("Выберите категорию:", reply_markup=category_keyboard())
+
+
+@router.callback_query(F.data == "action:wardrobe")
+async def action_wardrobe(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    await state.set_state(BotStates.wardrobe_view)
+    await _render_wardrobe_cards(message=callback.message, user_id=callback.from_user.id)
+    await callback.message.answer(
+        "Нажмите ⬅️ Назад, чтобы вернуться в меню.",
+        reply_markup=wardrobe_view_keyboard(),
+    )
 
 
 # ── Task 12: быстрый первый образ ───────────────────────────────
