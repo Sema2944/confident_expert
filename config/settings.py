@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     admitad_uid: str = ""
     replicate_api_token: str | None = None
     admin_id: int = 0
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_bucket: str = "shkaf-rabotaet"
+    s3_endpoint: str = "https://storage.yandexcloud.net"
 
 
 settings = Settings()

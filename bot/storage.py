@@ -42,6 +42,8 @@ async def init_storage() -> None:
             await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN display_name TEXT")
         if "price" not in columns:
             await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN price INTEGER DEFAULT 0")
+        if "photo_url" not in columns:
+            await connection.execute("ALTER TABLE wardrobe_items ADD COLUMN photo_url TEXT")
         await connection.execute(
             """
             CREATE TABLE IF NOT EXISTS feedback_messages (
@@ -194,6 +196,7 @@ async def add_item(
     processed_file_id: str | None = None,
     display_name: str | None = None,
     price: int = 0,
+    photo_url: str | None = None,
 ) -> int:
     metadata = {
         "type": item_type or "unknown",
@@ -215,9 +218,10 @@ async def add_item(
                 processed_file_id,
                 display_name,
                 metadata_json,
-                price
+                price,
+                photo_url
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -227,6 +231,7 @@ async def add_item(
                 display_name,
                 json.dumps(metadata, ensure_ascii=False),
                 price,
+                photo_url,
             ),
         )
         await connection.commit()
@@ -243,6 +248,10 @@ def _build_item_payload(row: aiosqlite.Row) -> dict[str, str | int | None]:
         created_at = row["created_at"]
     except Exception:
         created_at = None
+    try:
+        photo_url = row["photo_url"]
+    except Exception:
+        photo_url = None
     return {
         "id": row["id"],
         "category": row["category"],
@@ -251,6 +260,7 @@ def _build_item_payload(row: aiosqlite.Row) -> dict[str, str | int | None]:
         "display_name": row["display_name"],
         "price": price,
         "created_at": created_at,
+        "photo_url": photo_url,
         "type": metadata.get("type", "unknown"),
         "primary_color": metadata.get("primary_color", "unknown"),
         "secondary_color": metadata.get("secondary_color", "unknown"),
@@ -265,7 +275,7 @@ async def get_items(user_id: int) -> list[dict[str, str | int | None]]:
     async with _connect() as connection:
         cursor = await connection.execute(
             """
-            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at, photo_url
             FROM wardrobe_items
             WHERE user_id = ?
             ORDER BY id ASC
@@ -281,7 +291,7 @@ async def delete_item_by_id(user_id: int, item_id: int) -> dict[str, str | int |
     async with _connect() as connection:
         cursor = await connection.execute(
             """
-            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at
+            SELECT id, category, telegram_file_id, processed_file_id, display_name, metadata_json, price, created_at, photo_url
             FROM wardrobe_items
             WHERE id = ? AND user_id = ?
             """,
@@ -331,6 +341,20 @@ async def update_processed_file_id(user_id: int, item_id: int, file_id: str) -> 
             WHERE id = ? AND user_id = ?
             """,
             (file_id, item_id, user_id),
+        )
+        await connection.commit()
+    return cursor.rowcount > 0
+
+
+async def update_photo_url(user_id: int, item_id: int, photo_url: str) -> bool:
+    async with _connect() as connection:
+        cursor = await connection.execute(
+            """
+            UPDATE wardrobe_items
+            SET photo_url = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (photo_url, item_id, user_id),
         )
         await connection.commit()
     return cursor.rowcount > 0

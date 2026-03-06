@@ -14,7 +14,7 @@ class OutfitImageServiceTests(unittest.IsolatedAsyncioTestCase):
         service = OutfitImageService()
         fake_downloaded_image = object()
 
-        async def fake_download(bot, file_id):
+        async def fake_download(bot, file_id, **kwargs):
             return fake_downloaded_image if file_id == "top-1" else None
 
         with (
@@ -32,7 +32,7 @@ class OutfitImageServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_render_outfit_image_returns_none_if_no_downloaded_images(self) -> None:
         service = OutfitImageService()
 
-        async def fake_download(bot, file_id):
+        async def fake_download(bot, file_id, **kwargs):
             return None
 
         with patch.object(service, "_download_image", side_effect=fake_download):

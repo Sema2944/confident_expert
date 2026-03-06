@@ -30,6 +30,7 @@ from bot.storage import (
     update_display_name,
     update_item_metadata,
     update_item_price,
+    update_photo_url,
     update_processed_file_id,
 )
 from bot.states import BotStates
@@ -361,6 +362,16 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
         )
         await state.update_data(ai_saved_item_id=item_id)
 
+        # Upload compressed photo to S3 (non-blocking: errors don't break flow)
+        try:
+            from services.s3_storage_service import s3_service
+            if s3_service.enabled:
+                photo_url = s3_service.upload_photo(message.from_user.id, item_id, image_bytes)
+                if photo_url:
+                    await update_photo_url(message.from_user.id, item_id, photo_url)
+        except Exception:
+            logging.exception("S3 upload failed, continuing without S3")
+
         summary = build_russian_item_summary(category=category, analysis=analysis)
 
         if analysis.photo_quality == "poor":
@@ -677,6 +688,12 @@ async def delete_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> No
         await callback.message.answer("Не нашла эту вещь. Обновите гардероб и попробуйте снова.")
         return
     await callback.message.answer("Удалила вещь из гардероба.")
+    try:
+        from services.s3_storage_service import s3_service
+        if s3_service.enabled:
+            s3_service.delete_photo(callback.from_user.id, item_id)
+    except Exception:
+        logging.exception("S3 delete failed")
     items_left = await get_items(callback.from_user.id)
     if not items_left:
         await state.set_state(BotStates.menu)

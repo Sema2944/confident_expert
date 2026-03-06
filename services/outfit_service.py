@@ -11,12 +11,14 @@ class OutfitImageService:
         bot,
         items_payload: dict[str, list[str]],
         template_name: str = "outfit_story",
+        photo_urls: dict[str, str] | None = None,
     ) -> bytes | None:
         category_images: dict[str, object] = {}
         for category in self._CATEGORY_ORDER:
             file_ids = items_payload.get(category, [])
             for file_id in file_ids:
-                image = await self._download_image(bot=bot, file_id=file_id)
+                photo_url = (photo_urls or {}).get(file_id)
+                image = await self._download_image(bot=bot, file_id=file_id, photo_url=photo_url)
                 if image is not None:
                     category_images[category] = image
                     break
@@ -29,8 +31,22 @@ class OutfitImageService:
         composed.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    async def _download_image(self, bot, file_id: str):
+    async def _download_image(self, bot, file_id: str, photo_url: str | None = None):
         from PIL import Image
+        import httpx
+
+        # Try S3/URL first if available
+        if photo_url:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(photo_url)
+                    resp.raise_for_status()
+                    content = BytesIO(resp.content)
+                    image = Image.open(content)
+                    image.load()
+                    return image.convert("RGB")
+            except Exception:
+                pass  # fallback to Telegram
 
         try:
             telegram_file = await bot.get_file(file_id)
