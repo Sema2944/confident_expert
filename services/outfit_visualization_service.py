@@ -119,7 +119,7 @@ async def _generate_with_openai(prompt: str, max_retries: int = 3) -> bytes | No
                 resp = await client.post(
                     f"{settings.image_api_base.rstrip('/')}/images/generations",
                     headers={"Authorization": f"Bearer {settings.image_api_key}", "Content-Type": "application/json"},
-                    json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1792x1024"},
+                    json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1536x1024"},
                 )
                 resp.raise_for_status()
                 item = resp.json()["data"][0]

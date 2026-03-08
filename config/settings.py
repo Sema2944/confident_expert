@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     image_api_key: str | None = None
     image_api_base: str = "https://api.openai.com/v1"
     image_model: str = "gpt-image-1"
-    image_size: str = "1024x1792"
+    image_size: str = "1024x1536"
     stt_api_key: str | None = None
     fashion_trend_feeds: str | None = None
     max_items_per_user: int = 60
