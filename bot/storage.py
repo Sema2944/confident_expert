@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -24,6 +25,13 @@ _pg_pool = None
 def _ph(index: int) -> str:
     """Placeholder: $1 for PG, ? for SQLite."""
     return f"${index}" if _USE_PG else "?"
+
+
+def _now_ts() -> datetime | str:
+    """Current timestamp: datetime for PG (TIMESTAMPTZ), ISO string for SQLite."""
+    if _USE_PG:
+        return datetime.now(timezone.utc)
+    return datetime.now().isoformat()
 
 
 # ─── Connection helpers ─────────────────────────────────────────
@@ -672,19 +680,21 @@ async def set_user_location(user_id: int, city: str, lat: float | None = None, l
 
 
 async def record_paywall_hit(user_id: int) -> None:
-    from datetime import datetime as _dt
     async with _connect() as db:
         await db.execute(
             f"UPDATE user_profiles SET paywall_hit_at = {_ph(1)} WHERE user_id = {_ph(2)}",
-            (_dt.now().isoformat(), user_id),
+            (_now_ts(), user_id),
         )
         await db.commit()
 
 
 async def get_paywall_followup_users(hours_min: int = 24, hours_max: int = 48) -> list[dict]:
-    from datetime import datetime as _dt, timedelta as _td
-    cutoff_old = (_dt.now() - _td(hours=hours_max)).isoformat()
-    cutoff_new = (_dt.now() - _td(hours=hours_min)).isoformat()
+    now = datetime.now(timezone.utc) if _USE_PG else datetime.now()
+    cutoff_old = now - timedelta(hours=hours_max)
+    cutoff_new = now - timedelta(hours=hours_min)
+    if not _USE_PG:
+        cutoff_old = cutoff_old.isoformat()
+        cutoff_new = cutoff_new.isoformat()
     async with _connect() as db:
         rows = await db.fetch(
             f"""SELECT user_id FROM user_profiles
@@ -744,13 +754,15 @@ async def save_outfit_to_history(
 
 async def get_outfit_history(user_id: int, days: int = 7) -> list[dict]:
     if _USE_PG:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         sql = (
             "SELECT outfit_items, occasion, season, liked, created_at "
             "FROM outfit_history WHERE user_id = $1 "
-            "AND created_at >= NOW() - ($2 || ' days')::INTERVAL "
+            "AND created_at >= $2 "
             "ORDER BY created_at DESC"
         )
     else:
+        cutoff = f"-{days} days"
         sql = (
             "SELECT outfit_items, occasion, season, liked, created_at "
             "FROM outfit_history WHERE user_id = ? "
@@ -759,10 +771,7 @@ async def get_outfit_history(user_id: int, days: int = 7) -> list[dict]:
         )
 
     async with _connect() as db:
-        if _USE_PG:
-            rows = await db.fetch(sql, (user_id, str(days)))
-        else:
-            rows = await db.fetch(sql, (user_id, f"-{days} days"))
+        rows = await db.fetch(sql, (user_id, cutoff))
 
     result = []
     for row in rows:
@@ -818,11 +827,10 @@ async def should_show_survey(user_id: int, days: int = 7) -> bool:
 
 
 async def update_survey_shown_at(user_id: int) -> None:
-    from datetime import datetime as _dt
     async with _connect() as db:
         await db.execute(
             f"UPDATE user_profiles SET survey_shown_at = {_ph(1)} WHERE user_id = {_ph(2)}",
-            (_dt.now().isoformat(), user_id),
+            (_now_ts(), user_id),
         )
         await db.commit()
 

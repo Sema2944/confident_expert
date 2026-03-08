@@ -92,12 +92,16 @@ async def increment_outfit_count(user_id: int) -> None:
 
 
 async def activate_subscription(user_id: int, days: int) -> None:
-    from datetime import timedelta
-    until = datetime.now() + timedelta(days=days)
+    from datetime import timedelta, timezone as _tz
+    from bot.storage import _now_ts
+    now = datetime.now(_tz.utc) if _USE_PG else datetime.now()
+    until = now + timedelta(days=days)
+    if not _USE_PG:
+        until = until.isoformat()
     async with _connect() as db:
         await db.execute(
             f"UPDATE user_profiles SET subscription_status = 'active', subscription_until = {_ph(1)} "
             f"WHERE user_id = {_ph(2)}",
-            (until.isoformat(), user_id),
+            (until, user_id),
         )
         await db.commit()
