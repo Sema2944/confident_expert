@@ -40,21 +40,21 @@ Wardrobe items (JSON array):
 {items_list}
 
 You MUST return JSON in EXACT format:
-{
+{{
   "outfits": [
-    {
-      "items": {
+    {{
+      "items": {{
         "top": ["item_id"],
         "bottom": ["item_id"],
         "dress": ["item_id"],
         "outerwear": ["item_id"],
         "shoes": ["item_id"],
         "accessories": ["item_id"]
-      },
+      }},
       "description_ru": "Кратко на русском: что надето и почему образ подходит для выбранного повода и сезона."
-    }
+    }}
   ]
-}
+}}
 
 Additional rules:
 - In each outfit, use EITHER (top+bottom) OR (dress).

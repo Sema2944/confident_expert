@@ -170,15 +170,16 @@ async def _generate_and_show_outfit(
         and not any(normalize_category(item.get("category")) == "outerwear" for item in items)
     )
 
-    # Build file_id → photo_url mapping for S3 fallback
-    photo_urls: dict[str, str] = {}
+    # Build file_id → (user_id, item_id) mapping for S3 authorized download
+    s3_items: dict[str, tuple[int, int]] = {}
+    tg_user_id = message.from_user.id
     for item in items:
-        url = item.get("photo_url")
-        if url:
+        iid = item.get("id")
+        if iid and item.get("photo_url"):
             for fid_key in ("processed_file_id", "telegram_file_id"):
                 fid = item.get(fid_key)
                 if isinstance(fid, str) and fid:
-                    photo_urls[fid] = url
+                    s3_items[fid] = (tg_user_id, iid)
                     break
 
     shown_count = 0
@@ -189,7 +190,7 @@ async def _generate_and_show_outfit(
         outfit_image = await outfit_image_service.render_outfit_image(
             bot=message.bot,
             items_payload=outfit.items,
-            photo_urls=photo_urls or None,
+            s3_items=s3_items or None,
         )
         if outfit_image:
             await message.answer_photo(
@@ -457,15 +458,16 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             )
             return
 
-        # Build file_id → photo_url mapping for S3 fallback
-        reroll_photo_urls: dict[str, str] = {}
+        # Build file_id → (user_id, item_id) mapping for S3 authorized download
+        reroll_s3_items: dict[str, tuple[int, int]] = {}
+        reroll_user_id = callback.from_user.id
         for item in items:
-            url = item.get("photo_url")
-            if url:
+            iid = item.get("id")
+            if iid and item.get("photo_url"):
                 for fid_key in ("processed_file_id", "telegram_file_id"):
                     fid = item.get(fid_key)
                     if isinstance(fid, str) and fid:
-                        reroll_photo_urls[fid] = url
+                        reroll_s3_items[fid] = (reroll_user_id, iid)
                         break
 
         new_outfit: OutfitResult | None = None
@@ -509,7 +511,7 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
         outfit_image = await outfit_image_service.render_outfit_image(
             bot=callback.message.bot,
             items_payload=new_outfit.items,
-            photo_urls=reroll_photo_urls or None,
+            s3_items=reroll_s3_items or None,
         )
 
         if outfit_image:

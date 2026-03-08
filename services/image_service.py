@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 
@@ -7,6 +8,8 @@ from config.settings import settings
 
 
 class ImageService:
+    _MAX_RETRIES = 3
+
     async def generate_image(self, outfit_description: str) -> bytes | None:
         if not settings.image_api_key:
             logging.warning("IMAGE_API_KEY is empty; image generation is disabled.")
@@ -34,22 +37,33 @@ class ImageService:
             "size": size,
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{settings.image_api_base.rstrip('/')}/images/generations",
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-        except httpx.HTTPStatusError as error:
-            if self._is_unsupported_size_error(error):
-                logging.warning("Image API does not support size %s for model %s.", size, settings.image_model)
+        response = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{settings.image_api_base.rstrip('/')}/images/generations",
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as error:
+                if self._is_unsupported_size_error(error):
+                    logging.warning("Image API does not support size %s for model %s.", size, settings.image_model)
+                    return None
+                if error.response.status_code == 429 and attempt < self._MAX_RETRIES - 1:
+                    wait = 2 ** attempt
+                    logging.warning("Image API rate limited (429), retrying in %d sec (attempt %d/%d)", wait, attempt + 1, self._MAX_RETRIES)
+                    await asyncio.sleep(wait)
+                    continue
+                logging.exception("Image generation request failed: %s", error)
                 return None
-            logging.exception("Image generation request failed: %s", error)
-            return None
-        except Exception as error:
-            logging.exception("Image generation request failed: %s", error)
+            except Exception as error:
+                logging.exception("Image generation request failed: %s", error)
+                return None
+        else:
+            logging.error("Image generation failed after %d retries (rate limited)", self._MAX_RETRIES)
             return None
 
         data = response.json().get("data") or []

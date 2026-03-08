@@ -1,6 +1,9 @@
+import logging
 from io import BytesIO
 
 from services.photo_template_service import PhotoTemplateService
+
+logger = logging.getLogger(__name__)
 
 
 class OutfitImageService:
@@ -11,14 +14,19 @@ class OutfitImageService:
         bot,
         items_payload: dict[str, list[str]],
         template_name: str = "outfit_story",
-        photo_urls: dict[str, str] | None = None,
+        s3_items: dict[str, tuple[int, int]] | None = None,
     ) -> bytes | None:
         category_images: dict[str, object] = {}
         for category in self._CATEGORY_ORDER:
             file_ids = items_payload.get(category, [])
             for file_id in file_ids:
-                photo_url = (photo_urls or {}).get(file_id)
-                image = await self._download_image(bot=bot, file_id=file_id, photo_url=photo_url)
+                s3_info = (s3_items or {}).get(file_id)
+                user_id = s3_info[0] if s3_info else None
+                item_id = s3_info[1] if s3_info else None
+                image = await self._download_image(
+                    bot=bot, file_id=file_id,
+                    user_id=user_id, item_id=item_id,
+                )
                 if image is not None:
                     category_images[category] = image
                     break
@@ -31,23 +39,25 @@ class OutfitImageService:
         composed.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    async def _download_image(self, bot, file_id: str, photo_url: str | None = None):
+    async def _download_image(
+        self, bot, file_id: str,
+        user_id: int | None = None, item_id: int | None = None,
+    ):
         from PIL import Image
-        import httpx
 
-        # Try S3/URL first if available
-        if photo_url:
+        # Try S3 via authorized boto3 first
+        if user_id is not None and item_id is not None:
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(photo_url)
-                    resp.raise_for_status()
-                    content = BytesIO(resp.content)
-                    image = Image.open(content)
+                from services.s3_storage_service import s3_service
+                photo_bytes = s3_service.get_photo(user_id, item_id)
+                if photo_bytes:
+                    image = Image.open(BytesIO(photo_bytes))
                     image.load()
                     return image.convert("RGB")
             except Exception:
-                pass  # fallback to Telegram
+                logger.debug("S3 download failed for user=%s item=%s, falling back to Telegram", user_id, item_id)
 
+        # Fallback to Telegram file_id
         try:
             telegram_file = await bot.get_file(file_id)
             content = BytesIO()

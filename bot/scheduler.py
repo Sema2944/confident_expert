@@ -155,7 +155,20 @@ async def _send_morning_outfits(bot: Bot) -> None:
                 continue
 
             caption = f"☀️ Доброе утро! {weather_msg}\n\nВот твой образ на сегодня:"
-            collage = await image_svc.render_outfit_image(bot=bot, items_payload=outfits[0].items)
+            # Build S3 items mapping for authorized photo download
+            s3_items: dict[str, tuple[int, int]] = {}
+            for item in items:
+                iid = item.get("id")
+                if iid and item.get("photo_url"):
+                    for fid_key in ("processed_file_id", "telegram_file_id"):
+                        fid = item.get(fid_key)
+                        if isinstance(fid, str) and fid:
+                            s3_items[fid] = (user_id, iid)
+                            break
+            collage = await image_svc.render_outfit_image(
+                bot=bot, items_payload=outfits[0].items,
+                s3_items=s3_items or None,
+            )
 
             if collage:
                 await bot.send_photo(

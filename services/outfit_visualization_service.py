@@ -100,22 +100,32 @@ async def describe_items_for_mannequin(bot, items_payload: dict[str, list[str]])
 # ─── Шаг 2: Генерация картинки ────────────────────────────
 
 
-async def _generate_with_openai(prompt: str) -> bytes | None:
+async def _generate_with_openai(prompt: str, max_retries: int = 3) -> bytes | None:
     """Генерация через gpt-image-1 (OpenAI). Премиум: ~6₽/картинка."""
     if not settings.image_api_key:
         return None
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{settings.image_api_base.rstrip('/')}/images/generations",
-                headers={"Authorization": f"Bearer {settings.image_api_key}", "Content-Type": "application/json"},
-                json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1792x1024", "response_format": "b64_json"},
-            )
-            resp.raise_for_status()
-            return base64.b64decode(resp.json()["data"][0]["b64_json"])
-    except Exception:
-        logger.exception("OpenAI image generation failed")
-        return None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{settings.image_api_base.rstrip('/')}/images/generations",
+                    headers={"Authorization": f"Bearer {settings.image_api_key}", "Content-Type": "application/json"},
+                    json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1792x1024", "response_format": "b64_json"},
+                )
+                resp.raise_for_status()
+                return base64.b64decode(resp.json()["data"][0]["b64_json"])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logger.warning("OpenAI rate limited (429), retrying in %d sec (attempt %d/%d)", wait, attempt + 1, max_retries)
+                await asyncio.sleep(wait)
+                continue
+            logger.exception("OpenAI image generation failed")
+            return None
+        except Exception:
+            logger.exception("OpenAI image generation failed")
+            return None
+    return None
 
 
 async def _generate_with_replicate(prompt: str) -> bytes | None:
