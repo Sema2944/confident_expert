@@ -23,7 +23,7 @@ def occasion_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="🏢 Работа/офис"), KeyboardButton(text="💼 Собеседование")],
             [KeyboardButton(text="💕 Свидание"), KeyboardButton(text="🎉 Вечеринка")],
             [KeyboardButton(text="🚶 Прогулка"), KeyboardButton(text="🏃 Спорт")],
-            [KeyboardButton(text="⬅️ Назад")],
+            [KeyboardButton(text="🏠 Меню")],
         ],
         resize_keyboard=True,
     )
@@ -35,7 +35,7 @@ def season_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="❄️ Зима")],
             [KeyboardButton(text="🍂 Весна/осень")],
             [KeyboardButton(text="☀️ Лето")],
-            [KeyboardButton(text="⬅️ Назад")],
+            [KeyboardButton(text="🏠 Меню")],
         ],
         resize_keyboard=True,
     )
@@ -47,7 +47,7 @@ def category_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👕 Верх"), KeyboardButton(text="👖 Низ")],
             [KeyboardButton(text="🧥 Верхняя одежда"), KeyboardButton(text="👟 Обувь")],
             [KeyboardButton(text="🧢 Аксессуары"), KeyboardButton(text="👔 Цельный образ")],
-            [KeyboardButton(text="⬅️ Назад")],
+            [KeyboardButton(text="🏠 Меню")],
         ],
         resize_keyboard=True,
     )
@@ -55,14 +55,14 @@ def category_keyboard() -> ReplyKeyboardMarkup:
 
 def photo_upload_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+        keyboard=[[KeyboardButton(text="🏠 Меню")]],
         resize_keyboard=True,
     )
 
 
 def wardrobe_view_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+        keyboard=[[KeyboardButton(text="🏠 Меню")]],
         resize_keyboard=True,
     )
 
@@ -101,7 +101,7 @@ def subcategory_keyboard(category: str) -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton(text=sub, callback_data=f"msub:{sub}")
                for sub in subs[i:i+2]]
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mback:category")])
+    buttons.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -112,7 +112,7 @@ def color_keyboard() -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton(text=c, callback_data=f"mcol:{c}")
                for c in COLORS_RU[i:i+3]]
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mback:subcategory")])
+    buttons.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -120,7 +120,7 @@ def season_inline_keyboard() -> InlineKeyboardMarkup:
     """4 сезона."""
     buttons = [[InlineKeyboardButton(text=label, callback_data=f"msea:{code}")]
                for label, code in SEASONS_RU.items()]
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mback:color")])
+    buttons.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -129,7 +129,7 @@ def formality_keyboard() -> InlineKeyboardMarkup:
     buttons = [[InlineKeyboardButton(text=label, callback_data=f"mfor:{code}")]
                for label, code in FORMALITY_RU.items()]
     buttons.append([InlineKeyboardButton(text="⏩ Пропустить", callback_data="mfor:skip")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mback:season")])
+    buttons.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

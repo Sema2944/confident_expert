@@ -4,6 +4,10 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.types import ErrorEvent
 
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
+
 from bot.routers import feedback, menu, outfits, payment, search, subscription, survey, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.storage import init_storage
@@ -25,6 +29,18 @@ def build_dispatcher() -> Dispatcher:
     # survey must be before feedback (feedback has catch-all callback handler)
     dispatcher.include_router(survey.router)
     dispatcher.include_router(feedback.router)
+
+    # Universal 🏠 Меню handler — registered last as fallback for any state
+    fallback_router = Router(name="fallback_menu")
+
+    @fallback_router.message(F.text == "🏠 Меню")
+    async def go_to_menu(message: Message, state: FSMContext) -> None:
+        from bot.keyboards import menu_keyboard
+        from bot.states import BotStates
+        await state.set_state(BotStates.menu)
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
+
+    dispatcher.include_router(fallback_router)
 
     @dispatcher.error()
     async def global_error_handler(event: ErrorEvent, bot: Bot) -> None:

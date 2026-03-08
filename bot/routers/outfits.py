@@ -660,9 +660,9 @@ SEASONS = {
 
 @router.message(BotStates.request_occasion, F.text)
 async def set_occasion(message: Message, state: FSMContext) -> None:
-    if message.text == "⬅️ Назад":
+    if message.text == "🏠 Меню":
         await state.set_state(BotStates.menu)
-        await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
         return
 
     occasion = OCCASIONS.get(message.text)
@@ -686,9 +686,9 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
 
 @router.message(BotStates.request_season, F.text)
 async def set_season(message: Message, state: FSMContext) -> None:
-    if message.text == "⬅️ Назад":
-        await state.set_state(BotStates.request_occasion)
-        await message.answer("Куда идёшь?", reply_markup=occasion_keyboard())
+    if message.text == "🏠 Меню":
+        await state.set_state(BotStates.menu)
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
         return
 
     season = SEASONS.get(message.text)

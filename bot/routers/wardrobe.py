@@ -249,9 +249,9 @@ async def upload_start_short(message: Message, state: FSMContext) -> None:
 
 @router.message(BotStates.upload_category, F.text)
 async def set_category(message: Message, state: FSMContext) -> None:
-    if message.text == "⬅️ Назад":
+    if message.text == "🏠 Меню":
         await state.set_state(BotStates.menu)
-        await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
         return
 
     category = normalize_category(message.text)
@@ -604,7 +604,7 @@ async def manual_price_entered(message: Message, state: FSMContext) -> None:
     await message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 
 
-# ── Кнопки «Назад» в каскаде ────────────────────────────────────
+# ── Кнопки «Меню» в каскаде ─────────────────────────────────────
 
 
 @router.callback_query(F.data == "mback:category")
@@ -645,10 +645,10 @@ async def manual_back_to_season(callback: CallbackQuery, state: FSMContext) -> N
     await callback.message.answer("Выберите сезон:", reply_markup=season_inline_keyboard())
 
 
-@router.message(BotStates.upload_photos, F.text == "⬅️ Назад")
-async def back_to_category(message: Message, state: FSMContext) -> None:
-    await state.set_state(BotStates.upload_category)
-    await message.answer("Выберите категорию:", reply_markup=category_keyboard())
+@router.message(BotStates.upload_photos, F.text == "🏠 Меню")
+async def back_to_menu_from_upload(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.menu)
+    await message.answer("Главное меню:", reply_markup=menu_keyboard())
 
 
 @router.message(BotStates.upload_photos)
@@ -660,7 +660,7 @@ async def upload_photo_prompt(message: Message) -> None:
 async def wardrobe_list(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.wardrobe_view)
     await _render_wardrobe_cards(message=message, user_id=message.from_user.id)
-    await message.answer("Нажмите ⬅️ Назад, чтобы вернуться в меню.", reply_markup=wardrobe_view_keyboard())
+    await message.answer("Нажмите 🏠 Меню, чтобы вернуться.", reply_markup=wardrobe_view_keyboard())
 
 
 @router.callback_query(F.data.startswith("item:delete:"))
@@ -806,11 +806,11 @@ async def handle_price_input(message: Message, state: FSMContext) -> None:
         await message.answer("Не удалось обновить цену. Попробуйте снова.")
 
 
-@router.message(BotStates.wardrobe_view, F.text == "⬅️ Назад")
+@router.message(BotStates.wardrobe_view, F.text == "🏠 Меню")
 async def wardrobe_back_to_menu(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.menu)
     await state.update_data(rename_item_id=None)
-    await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+    await message.answer("Главное меню:", reply_markup=menu_keyboard())
 
 
 @router.message(BotStates.wardrobe_view, F.text)
@@ -868,7 +868,7 @@ async def action_wardrobe(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(BotStates.wardrobe_view)
     await _render_wardrobe_cards(message=callback.message, user_id=callback.from_user.id)
     await callback.message.answer(
-        "Нажмите ⬅️ Назад, чтобы вернуться в меню.",
+        "Нажмите 🏠 Меню, чтобы вернуться.",
         reply_markup=wardrobe_view_keyboard(),
     )
 
@@ -1072,10 +1072,10 @@ async def handle_check_photo(message: Message, state: FSMContext) -> None:
         )
 
 
-@router.message(BotStates.check_compatibility, F.text == "⬅️ Назад")
+@router.message(BotStates.check_compatibility, F.text == "🏠 Меню")
 async def check_back(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.menu)
-    await message.answer("Вернулись в меню.", reply_markup=menu_keyboard())
+    await message.answer("Главное меню:", reply_markup=menu_keyboard())
 
 
 # ── Task 15: советы стилиста ─────────────────────────────────────
