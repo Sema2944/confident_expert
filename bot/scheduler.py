@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 
-from bot.storage import _connect
+from bot.storage import _connect, _USE_PG, _ph
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 CHANNEL_ID = "@shkaf_rabotaet"
@@ -17,67 +17,85 @@ CHANNEL_ID = "@shkaf_rabotaet"
 
 
 async def init_scheduled_posts_table() -> None:
-    async with _connect() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS scheduled_posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scheduled_at TEXT NOT NULL,
-                post_type TEXT NOT NULL DEFAULT 'text',
-                text_content TEXT,
-                poll_question TEXT,
-                poll_options_json TEXT,
-                channel_id TEXT NOT NULL DEFAULT '@shkaf_rabotaet',
-                status TEXT NOT NULL DEFAULT 'pending',
-                sent_at TEXT,
-                error_message TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
+    async with _connect() as db:
+        if _USE_PG:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_posts (
+                    id SERIAL PRIMARY KEY,
+                    scheduled_at TEXT NOT NULL,
+                    post_type TEXT NOT NULL DEFAULT 'text',
+                    text_content TEXT,
+                    poll_question TEXT,
+                    poll_options_json TEXT,
+                    channel_id TEXT NOT NULL DEFAULT '@shkaf_rabotaet',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    sent_at TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+                """
             )
-            """
-        )
-        await conn.execute(
+        else:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scheduled_at TEXT NOT NULL,
+                    post_type TEXT NOT NULL DEFAULT 'text',
+                    text_content TEXT,
+                    poll_question TEXT,
+                    poll_options_json TEXT,
+                    channel_id TEXT NOT NULL DEFAULT '@shkaf_rabotaet',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    sent_at TEXT,
+                    error_message TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
+        await db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_scheduled_posts_status_time
             ON scheduled_posts (status, scheduled_at)
             """
         )
-        await conn.commit()
+        await db.commit()
 
 
 async def get_due_posts() -> list[dict]:
     now_utc = datetime.now(timezone.utc).isoformat()
-    async with _connect() as conn:
-        cursor = await conn.execute(
-            """
+    async with _connect() as db:
+        rows = await db.fetch(
+            f"""
             SELECT id, scheduled_at, post_type, text_content,
                    poll_question, poll_options_json, channel_id
             FROM scheduled_posts
-            WHERE status = 'pending' AND scheduled_at <= ?
+            WHERE status = 'pending' AND scheduled_at <= {_ph(1)}
             ORDER BY scheduled_at ASC
             """,
             (now_utc,),
         )
-        rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return rows
 
 
 async def mark_post_sent(post_id: int) -> None:
     now_utc = datetime.now(timezone.utc).isoformat()
-    async with _connect() as conn:
-        await conn.execute(
-            "UPDATE scheduled_posts SET status = 'sent', sent_at = ? WHERE id = ?",
+    async with _connect() as db:
+        await db.execute(
+            f"UPDATE scheduled_posts SET status = 'sent', sent_at = {_ph(1)} WHERE id = {_ph(2)}",
             (now_utc, post_id),
         )
-        await conn.commit()
+        await db.commit()
 
 
 async def mark_post_failed(post_id: int, error: str) -> None:
-    async with _connect() as conn:
-        await conn.execute(
-            "UPDATE scheduled_posts SET status = 'failed', error_message = ? WHERE id = ?",
+    async with _connect() as db:
+        await db.execute(
+            f"UPDATE scheduled_posts SET status = 'failed', error_message = {_ph(1)} WHERE id = {_ph(2)}",
             (error, post_id),
         )
-        await conn.commit()
+        await db.commit()
 
 
 # ─── Sending ───────────────────────────────────────────────
@@ -430,22 +448,21 @@ WEEK2_POSTS = [
 
 
 async def seed_week2_posts() -> int:
-    async with _connect() as conn:
+    async with _connect() as db:
         changed = 0
         for post in WEEK2_POSTS:
-            cursor = await conn.execute(
-                "SELECT id, status FROM scheduled_posts WHERE scheduled_at = ?",
+            existing = await db.fetchone(
+                f"SELECT id, status FROM scheduled_posts WHERE scheduled_at = {_ph(1)}",
                 (post["scheduled_at"],),
             )
-            existing = await cursor.fetchone()
             if existing:
                 continue
-            await conn.execute(
-                """
+            await db.execute(
+                f"""
                 INSERT INTO scheduled_posts
                     (scheduled_at, post_type, text_content,
                      poll_question, poll_options_json, channel_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)})
                 """,
                 (
                     post["scheduled_at"],
@@ -457,28 +474,27 @@ async def seed_week2_posts() -> int:
                 ),
             )
             changed += 1
-        await conn.commit()
+        await db.commit()
     logging.info("Seeded/updated %d scheduled posts (Week 2)", changed)
     return changed
 
 
 async def seed_week1_posts() -> int:
-    async with _connect() as conn:
+    async with _connect() as db:
         changed = 0
         for post in WEEK1_POSTS:
-            cursor = await conn.execute(
-                "SELECT id, status FROM scheduled_posts WHERE scheduled_at = ?",
+            existing = await db.fetchone(
+                f"SELECT id, status FROM scheduled_posts WHERE scheduled_at = {_ph(1)}",
                 (post["scheduled_at"],),
             )
-            existing = await cursor.fetchone()
 
             if existing:
                 if existing["status"] == "pending":
-                    await conn.execute(
-                        """
+                    await db.execute(
+                        f"""
                         UPDATE scheduled_posts
-                        SET text_content = ?, poll_question = ?, poll_options_json = ?
-                        WHERE id = ?
+                        SET text_content = {_ph(1)}, poll_question = {_ph(2)}, poll_options_json = {_ph(3)}
+                        WHERE id = {_ph(4)}
                         """,
                         (
                             post.get("text_content"),
@@ -490,12 +506,12 @@ async def seed_week1_posts() -> int:
                     changed += 1
                 continue
 
-            await conn.execute(
-                """
+            await db.execute(
+                f"""
                 INSERT INTO scheduled_posts
                     (scheduled_at, post_type, text_content,
                      poll_question, poll_options_json, channel_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)})
                 """,
                 (
                     post["scheduled_at"],
@@ -508,6 +524,6 @@ async def seed_week1_posts() -> int:
             )
             changed += 1
 
-        await conn.commit()
+        await db.commit()
     logging.info("Seeded/updated %d scheduled posts (Week 1)", changed)
     return changed
