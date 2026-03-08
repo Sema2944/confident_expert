@@ -591,7 +591,33 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
         mannequin_image = await generate_mannequin_image(description, is_premium=is_premium)
         if not mannequin_image:
-            # Fallback на старый метод
+            # Fallback 1: коллаж из реальных фото
+            s3_items: dict[str, tuple[int, int]] = {}
+            try:
+                items = await get_items(callback.from_user.id)
+                for item in items:
+                    iid = item.get("id")
+                    if iid and item.get("photo_url"):
+                        for fid_key in ("processed_file_id", "telegram_file_id"):
+                            fid = item.get(fid_key)
+                            if isinstance(fid, str) and fid:
+                                s3_items[fid] = (callback.from_user.id, iid)
+                                break
+            except Exception:
+                pass
+            collage = await outfit_image_service.render_outfit_image(
+                bot=callback.message.bot,
+                items_payload=items_payload,
+                s3_items=s3_items or None,
+            )
+            if collage:
+                await callback.message.answer_photo(
+                    photo=BufferedInputFile(collage, filename="outfit_collage.png"),
+                    caption="⏳ Визуализация на манекене временно недоступна. Вот коллаж из ваших вещей:",
+                )
+                await _log_outfit_event("outfit_visualize_collage_fallback", callback.message)
+                return
+            # Fallback 2: стилизация по описанию
             image_prompt = data.get("last_image_prompt")
             if image_prompt:
                 generated = await image_service.generate_image(image_prompt)

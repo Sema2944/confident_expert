@@ -1,5 +1,6 @@
 """Определение сезона по реальной погоде через Open-Meteo (бесплатно, без ключа)."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -9,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 # Кэш: {cache_key: (temperature, timestamp)}
 _weather_cache: dict[str, tuple[float, datetime]] = {}
-_CACHE_TTL = timedelta(hours=2)
+_CACHE_TTL = timedelta(minutes=30)
+_MAX_RETRIES = 3
 
 # Координаты основных городов (fallback если пользователь не указал город)
 CITY_COORDS: dict[str, tuple[float, float]] = {
@@ -37,24 +39,34 @@ async def get_current_temperature(lat: float, lon: float) -> float | None:
         if now - cached_at < _CACHE_TTL:
             return temp
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "current_weather": "true",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            temp = data["current_weather"]["temperature"]
-            _weather_cache[cache_key] = (temp, now)
-            return temp
-    except Exception:
-        logger.exception("Failed to get weather from Open-Meteo")
-        return None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": lat,
+                        "longitude": lon,
+                        "current_weather": "true",
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                temp = data["current_weather"]["temperature"]
+                _weather_cache[cache_key] = (temp, now)
+                return temp
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
+                wait = 2 ** attempt
+                logger.warning("Open-Meteo rate limited (429), retrying in %d sec (attempt %d/%d)", wait, attempt + 1, _MAX_RETRIES)
+                await asyncio.sleep(wait)
+                continue
+            logger.exception("Failed to get weather from Open-Meteo")
+            return None
+        except Exception:
+            logger.exception("Failed to get weather from Open-Meteo")
+            return None
+    return None
 
 
 def temperature_to_season(temp: float) -> str:
@@ -74,6 +86,17 @@ SEASON_WEATHER_TEXT: dict[str, str] = {
 }
 
 
+def _fallback_season() -> str:
+    """Определение сезона по текущему месяцу (fallback если API недоступен)."""
+    month = datetime.now().month
+    if month in (12, 1, 2, 3):  # декабрь-март
+        return "winter"
+    elif month in (4, 5, 9, 10, 11):  # апрель-май, сентябрь-ноябрь
+        return "demi"
+    else:  # июнь-август
+        return "summer"
+
+
 async def detect_season_for_user(user_id: int) -> tuple[str, str]:
     """Определить сезон для пользователя.
 
@@ -91,13 +114,13 @@ async def detect_season_for_user(user_id: int) -> tuple[str, str]:
         temp = await get_current_temperature(*coords)
 
     if temp is None:
-        month = datetime.now().month
-        if month in (12, 1, 2):
-            return "winter", "❄️ Подбираю зимний образ"
-        elif month in (3, 4, 5, 9, 10, 11):
-            return "demi", "🍂 Подбираю демисезонный образ"
-        else:
-            return "summer", "☀️ Подбираю лёгкий образ"
+        season = _fallback_season()
+        fallback_msg = {
+            "winter": "❄️ Подбираю зимний образ",
+            "demi": "🍂 Подбираю демисезонный образ",
+            "summer": "☀️ Подбираю лёгкий образ",
+        }
+        return season, fallback_msg[season]
 
     season = temperature_to_season(temp)
     message = SEASON_WEATHER_TEXT[season].format(temp=round(temp))

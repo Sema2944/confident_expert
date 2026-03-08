@@ -100,10 +100,19 @@ async def describe_items_for_mannequin(bot, items_payload: dict[str, list[str]])
 # ─── Шаг 2: Генерация картинки ────────────────────────────
 
 
+_MAX_PROMPT_LENGTH = 4000  # gpt-image-1 prompt limit
+
+
 async def _generate_with_openai(prompt: str, max_retries: int = 3) -> bytes | None:
     """Генерация через gpt-image-1 (OpenAI). Премиум: ~6₽/картинка."""
     if not settings.image_api_key:
         return None
+
+    # Truncate prompt if too long for the API
+    if len(prompt) > _MAX_PROMPT_LENGTH:
+        logger.warning("Truncating image prompt from %d to %d chars", len(prompt), _MAX_PROMPT_LENGTH)
+        prompt = prompt[:_MAX_PROMPT_LENGTH]
+
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -115,6 +124,9 @@ async def _generate_with_openai(prompt: str, max_retries: int = 3) -> bytes | No
                 resp.raise_for_status()
                 return base64.b64decode(resp.json()["data"][0]["b64_json"])
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.error("OpenAI image generation 400 error body: %s", e.response.text[:500])
+                return None
             if e.response.status_code == 429 and attempt < max_retries - 1:
                 wait = 2 ** attempt
                 logger.warning("OpenAI rate limited (429), retrying in %d sec (attempt %d/%d)", wait, attempt + 1, max_retries)
