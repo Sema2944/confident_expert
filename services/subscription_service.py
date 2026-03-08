@@ -1,29 +1,34 @@
-"""Trial gating и управление подписками (SQLite)."""
+"""Trial gating и управление подписками."""
 
 from datetime import datetime
 
-from bot.storage import _connect
+from bot.storage import _connect, _ph, _USE_PG
+
 
 FREE_OUTFIT_LIMIT = 3
 
 
 async def get_or_create_user(user_id: int, username: str | None = None) -> dict:
-    async with _connect() as connection:
-        cursor = await connection.execute(
-            "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,),
+    async with _connect() as db:
+        row = await db.fetchone(
+            f"SELECT * FROM user_profiles WHERE user_id = {_ph(1)}", (user_id,),
         )
-        row = await cursor.fetchone()
         if row:
             return dict(row)
 
-        await connection.execute(
-            """
-            INSERT INTO user_profiles (user_id, username)
-            VALUES (?, ?)
-            """,
-            (user_id, username),
-        )
-        await connection.commit()
+        if _USE_PG:
+            await db.execute(
+                "INSERT INTO user_profiles (user_id, username) VALUES ($1, $2) "
+                "ON CONFLICT (user_id) DO NOTHING",
+                (user_id, username),
+            )
+        else:
+            await db.execute(
+                "INSERT INTO user_profiles (user_id, username) VALUES (?, ?)",
+                (user_id, username),
+            )
+            await db.commit()
+
         return {
             "user_id": user_id,
             "username": username,
@@ -49,8 +54,8 @@ async def can_generate_outfit(user_id: int) -> tuple[bool, str]:
         until = user.get("subscription_until")
         if until:
             try:
-                until_dt = datetime.fromisoformat(until)
-                if until_dt > datetime.now():
+                until_dt = datetime.fromisoformat(str(until)) if not isinstance(until, datetime) else until
+                if until_dt.replace(tzinfo=None) > datetime.now():
                     return True, ""
             except (ValueError, TypeError):
                 pass
@@ -77,28 +82,22 @@ async def can_generate_outfit(user_id: int) -> tuple[bool, str]:
 
 
 async def increment_outfit_count(user_id: int) -> None:
-    async with _connect() as connection:
-        await connection.execute(
-            """
-            UPDATE user_profiles
-            SET outfit_requests_count = outfit_requests_count + 1
-            WHERE user_id = ?
-            """,
+    async with _connect() as db:
+        await db.execute(
+            f"UPDATE user_profiles SET outfit_requests_count = outfit_requests_count + 1 "
+            f"WHERE user_id = {_ph(1)}",
             (user_id,),
         )
-        await connection.commit()
+        await db.commit()
 
 
 async def activate_subscription(user_id: int, days: int) -> None:
     from datetime import timedelta
     until = datetime.now() + timedelta(days=days)
-    async with _connect() as connection:
-        await connection.execute(
-            """
-            UPDATE user_profiles
-            SET subscription_status = 'active', subscription_until = ?
-            WHERE user_id = ?
-            """,
+    async with _connect() as db:
+        await db.execute(
+            f"UPDATE user_profiles SET subscription_status = 'active', subscription_until = {_ph(1)} "
+            f"WHERE user_id = {_ph(2)}",
             (until.isoformat(), user_id),
         )
-        await connection.commit()
+        await db.commit()

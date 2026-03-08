@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     subscription_days: int = 30
     admitad_uid: str = ""
     replicate_api_token: str | None = None
+    db_url: str | None = None
     admin_id: int = 0
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
