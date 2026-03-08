@@ -119,10 +119,21 @@ async def _generate_with_openai(prompt: str, max_retries: int = 3) -> bytes | No
                 resp = await client.post(
                     f"{settings.image_api_base.rstrip('/')}/images/generations",
                     headers={"Authorization": f"Bearer {settings.image_api_key}", "Content-Type": "application/json"},
-                    json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1792x1024", "response_format": "b64_json"},
+                    json={"model": settings.image_model, "prompt": prompt, "n": 1, "size": "1792x1024"},
                 )
                 resp.raise_for_status()
-                return base64.b64decode(resp.json()["data"][0]["b64_json"])
+                item = resp.json()["data"][0]
+                b64 = item.get("b64_json")
+                if b64:
+                    return base64.b64decode(b64)
+                # gpt-image-1 may return URL instead of b64
+                image_url = item.get("url")
+                if image_url:
+                    img_resp = await client.get(image_url)
+                    img_resp.raise_for_status()
+                    return img_resp.content
+                logger.error("OpenAI image response has neither b64_json nor url")
+                return None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
                 logger.error("OpenAI image generation 400 error body: %s", e.response.text[:500])
