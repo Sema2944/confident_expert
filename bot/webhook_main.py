@@ -132,6 +132,9 @@ async def main() -> None:
 
     port = int(os.getenv("PORT", "10000"))
     runner = web.AppRunner(app)
+    if settings.max_bot_token:
+        from bot_max.max_main import run_max_bot
+        asyncio.create_task(run_max_bot())
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
