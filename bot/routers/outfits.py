@@ -471,6 +471,13 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                         reroll_s3_items[fid] = (reroll_user_id, iid)
                         break
 
+        # Collect file_ids from previous outfit to exclude
+        prev_file_ids: set[str] = set()
+        if last_items:
+            for fids in last_items.values():
+                if isinstance(fids, list):
+                    prev_file_ids.update(fids)
+
         new_outfit: OutfitResult | None = None
         generation_error = False
         for _ in range(3):
@@ -481,6 +488,7 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                     season=season,
                     count=1,
                     user_id=callback.from_user.id,
+                    exclude_file_ids=prev_file_ids,
                 )
             except Exception:
                 logging.exception("Reroll generation failed")

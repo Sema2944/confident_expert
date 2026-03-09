@@ -398,6 +398,7 @@ class OutfitService:
         count: int,
         liked_file_ids: set[str] | None = None,
         recently_used: set[str] | None = None,
+        exclude_file_ids: set[str] | None = None,
     ) -> list[OutfitResult]:
         """Локальная генерация образов (без AI)."""
         filtered = _filter_items_for_context(items, occasion, season)
@@ -421,11 +422,10 @@ class OutfitService:
         start_offset = random.randint(0, 1_000_000)
 
         for index in range(count):
-            best_result: OutfitResult | None = None
-            best_score = -1.0
+            candidates: list[tuple[float, OutfitResult]] = []
 
-            for attempt in range(5):
-                item_offset = start_offset + index * 5 + attempt
+            for attempt in range(10):
+                item_offset = start_offset + index * 10 + attempt
                 result, outfit_items = self._build_one_outfit(
                     grouped, item_offset, occasion, season, index,
                 )
@@ -436,12 +436,22 @@ class OutfitService:
                 # Winter bonus: prioritize outfits with outerwear
                 if season == "winter" and result.items.get("outerwear"):
                     score += 0.5
-                if score > best_score:
-                    best_score = score
-                    best_result = result
+                # Penalty for excluded items (previous outfit on reroll)
+                if exclude_file_ids:
+                    outfit_fids: set[str] = set()
+                    for fids in result.items.values():
+                        outfit_fids.update(fids)
+                    overlap = outfit_fids & exclude_file_ids
+                    if overlap:
+                        score -= len(overlap) * 1.0
+                candidates.append((score, result))
 
-            if best_result:
-                results.append(best_result)
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                # Among top-5 by score, pick randomly for variety
+                top = candidates[:5]
+                random.shuffle(top)
+                results.append(top[0][1])
 
         return results
 
@@ -452,6 +462,7 @@ class OutfitService:
         season: str,
         count: int,
         user_id: int | None = None,
+        exclude_file_ids: set[str] | None = None,
     ) -> list[OutfitResult]:
         # Получаем лайкнутые вещи для бустинга
         liked_file_ids: set[str] = set()
@@ -482,4 +493,5 @@ class OutfitService:
             items, occasion, season, count,
             liked_file_ids=liked_file_ids,
             recently_used=recently_used,
+            exclude_file_ids=exclude_file_ids,
         )
