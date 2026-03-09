@@ -236,5 +236,66 @@ class WinterOuterwearFilterTests(unittest.TestCase):
         self.assertNotIn("outerwear", categories)
 
 
+class BaseOutfitTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for generate_outfits_around_base and pick_base_item."""
+
+    async def test_generate_outfits_around_base_includes_base(self) -> None:
+        service = OutfitService()
+        items = [
+            {"id": 1, "category": "bottom", "telegram_file_id": "bottom-1", "primary_color": "blue"},
+            {"id": 2, "category": "top", "telegram_file_id": "top-1", "primary_color": "white"},
+            {"id": 3, "category": "top", "telegram_file_id": "top-2", "primary_color": "black"},
+            {"id": 4, "category": "shoes", "telegram_file_id": "shoe-1", "primary_color": "black"},
+            {"id": 5, "category": "shoes", "telegram_file_id": "shoe-2", "primary_color": "white"},
+        ]
+        outfits = await service.generate_outfits_around_base(
+            items=items, base_item_id=1, occasion="casual", season="all", count=3,
+        )
+        self.assertGreaterEqual(len(outfits), 1)
+        # Base item (bottom-1) should be in every outfit
+        for outfit in outfits:
+            self.assertIn("bottom-1", outfit.items.get("bottom", []))
+
+    async def test_generate_outfits_around_base_returns_empty_for_missing_item(self) -> None:
+        service = OutfitService()
+        items = [
+            {"id": 1, "category": "top", "telegram_file_id": "top-1"},
+            {"id": 2, "category": "shoes", "telegram_file_id": "shoe-1"},
+        ]
+        outfits = await service.generate_outfits_around_base(
+            items=items, base_item_id=999, occasion="casual", season="all",
+        )
+        self.assertEqual(len(outfits), 0)
+
+    def test_pick_base_item_prefers_onepiece(self) -> None:
+        items = [
+            {"category": "top", "id": 1},
+            {"category": "bottom", "id": 2},
+            {"category": "onepiece", "id": 3},
+            {"category": "shoes", "id": 4},
+        ]
+        base = OutfitService.pick_base_item(items)
+        self.assertIsNotNone(base)
+        self.assertEqual(base["category"], "onepiece")
+
+    def test_pick_base_item_prefers_bottom_over_top(self) -> None:
+        items = [
+            {"category": "top", "id": 1},
+            {"category": "bottom", "id": 2},
+            {"category": "shoes", "id": 3},
+        ]
+        base = OutfitService.pick_base_item(items)
+        self.assertIsNotNone(base)
+        self.assertEqual(base["category"], "bottom")
+
+    def test_pick_base_item_returns_none_for_accessories_only(self) -> None:
+        items = [
+            {"category": "accessory", "id": 1},
+            {"category": "shoes", "id": 2},
+        ]
+        base = OutfitService.pick_base_item(items)
+        self.assertIsNone(base)
+
+
 if __name__ == "__main__":
     unittest.main()

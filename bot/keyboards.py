@@ -314,3 +314,46 @@ def after_upload_capsule_keyboard(capsule_names: list[str], item_id: int) -> Inl
         InlineKeyboardButton(text="⏩ Пропустить", callback_data="capsule:suggest:skip"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ── Base item selection keyboards ──────────────────────────────
+
+
+_BASE_CAT_EMOJI = {
+    "top": "👕", "bottom": "👖", "outerwear": "🧥",
+    "shoes": "👟", "accessory": "🧢", "onepiece": "👔",
+}
+
+
+def base_item_select_keyboard(items: list[dict], occasion: str) -> InlineKeyboardMarkup:
+    """Select base item for multi-outfit generation."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in items[:8]:
+        cat = item.get("category", "")
+        emoji = _BASE_CAT_EMOJI.get(cat, "📦")
+        name = item.get("display_name") or item.get("type") or "вещь"
+        color = item.get("primary_color") or ""
+        label = f"{emoji} {color} {name}".strip()[:40]
+        rows.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"base:item:{item['id']}:{occasion}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="🎲 Бот выберет сам",
+        callback_data=f"base:auto:{occasion}",
+    )])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def outfit_choice_keyboard(count: int) -> InlineKeyboardMarkup:
+    """Buttons 1/2/3 + Другая база + Меню."""
+    num_row = []
+    for i in range(1, count + 1):
+        num_row.append(InlineKeyboardButton(text=f"{i}\u20e3", callback_data=f"outfit:pick:{i}"))
+    rows = [num_row]
+    rows.append([
+        InlineKeyboardButton(text="🔄 Другая база", callback_data="outfit:change_base"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

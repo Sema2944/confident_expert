@@ -455,6 +455,219 @@ class OutfitService:
 
         return results
 
+    def _build_one_outfit_with_base(
+        self,
+        grouped: dict[str, list[dict]],
+        base_item: dict,
+        base_category: str,
+        occasion: str,
+        season: str,
+        index: int,
+        exclude_item_ids: set[int] | None = None,
+    ) -> tuple[OutfitResult | None, list[dict]]:
+        """Build one outfit around a fixed base item."""
+        exclude = exclude_item_ids or set()
+
+        def _pick_best(items_list: list[dict], base_items: list[dict]) -> dict | None:
+            available = [i for i in items_list if i.get("id") not in exclude]
+            if not available:
+                available = items_list  # fallback
+            if not available:
+                return None
+            # Score by color compatibility with base
+            scored = []
+            for item in available:
+                test_outfit = base_items + [item]
+                score = _color_compatibility_score(test_outfit) + random.random() * 0.1
+                scored.append((score, item))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return scored[0][1]
+
+        tops = grouped.get("top", [])
+        bottoms = grouped.get("bottom", [])
+        dresses = grouped.get("onepiece", [])
+        outerwears = grouped.get("outerwear", [])
+        shoes = grouped.get("shoes", [])
+        accessories = grouped.get("accessory", [])
+
+        # Determine outfit structure based on base category
+        top = bottom = dress = shoe = outerwear = accessory = None
+        base_items_so_far = [base_item]
+
+        if base_category == "onepiece":
+            dress = base_item
+        elif base_category == "bottom":
+            bottom = base_item
+            top = _pick_best(tops, base_items_so_far)
+            if top:
+                base_items_so_far.append(top)
+        elif base_category == "top":
+            top = base_item
+            bottom = _pick_best(bottoms, base_items_so_far)
+            if bottom:
+                base_items_so_far.append(bottom)
+        elif base_category == "outerwear":
+            outerwear = base_item
+            # Need top+bottom or dress
+            if dresses:
+                dress = _pick_best(dresses, base_items_so_far)
+                if dress:
+                    base_items_so_far.append(dress)
+            if not dress:
+                top = _pick_best(tops, base_items_so_far)
+                if top:
+                    base_items_so_far.append(top)
+                bottom = _pick_best(bottoms, base_items_so_far)
+                if bottom:
+                    base_items_so_far.append(bottom)
+        elif base_category == "shoes":
+            shoe = base_item
+            # Need top+bottom or dress
+            if dresses and random.random() > 0.5:
+                dress = _pick_best(dresses, base_items_so_far)
+                if dress:
+                    base_items_so_far.append(dress)
+            if not dress:
+                top = _pick_best(tops, base_items_so_far)
+                if top:
+                    base_items_so_far.append(top)
+                bottom = _pick_best(bottoms, base_items_so_far)
+                if bottom:
+                    base_items_so_far.append(bottom)
+
+        # Fill missing required slots
+        if not shoe and base_category != "shoes":
+            shoe = _pick_best(shoes, base_items_so_far)
+            if shoe:
+                base_items_so_far.append(shoe)
+        if not shoe:
+            return None, []
+
+        if not dress and not top and base_category not in ("top", "onepiece"):
+            top = _pick_best(tops, base_items_so_far)
+            if top:
+                base_items_so_far.append(top)
+        if not dress and not bottom and base_category not in ("bottom", "onepiece"):
+            bottom = _pick_best(bottoms, base_items_so_far)
+            if bottom:
+                base_items_so_far.append(bottom)
+
+        if not dress and not (top and bottom):
+            # Try dress as fallback
+            dress = _pick_best(dresses, base_items_so_far)
+            if dress:
+                base_items_so_far.append(dress)
+            if not dress:
+                return None, []
+
+        # Optional outerwear for winter
+        if not outerwear and season == "winter" and outerwears and base_category != "outerwear":
+            outerwear = _pick_best(outerwears, base_items_so_far)
+            if outerwear:
+                base_items_so_far.append(outerwear)
+
+        # Optional accessory
+        if accessories and base_category != "accessory":
+            accessory = _pick_best(accessories, base_items_so_far)
+
+        outfit_items = [i for i in [top, bottom, dress, shoe, outerwear, accessory] if i]
+        items_payload = {
+            "top": [self._preferred_file_id(top)] if self._preferred_file_id(top) else [],
+            "bottom": [self._preferred_file_id(bottom)] if self._preferred_file_id(bottom) else [],
+            "dress": [self._preferred_file_id(dress)] if self._preferred_file_id(dress) else [],
+            "outerwear": [self._preferred_file_id(outerwear)] if self._preferred_file_id(outerwear) else [],
+            "shoes": [self._preferred_file_id(shoe)] if self._preferred_file_id(shoe) else [],
+            "accessories": [self._preferred_file_id(accessory)] if self._preferred_file_id(accessory) else [],
+        }
+
+        use_dress = dress is not None
+        description = (
+            f"Образ #{index + 1}: {occasion}, {season}. "
+            f"{'Платье + обувь' if use_dress else 'Верх + низ + обувь'}"
+            f"{' + верхняя одежда' if outerwear else ''}"
+            f"{' + аксессуары' if accessory else ''}."
+        )
+        image_prompt = self._build_image_prompt(
+            top=top, bottom=bottom, dress=dress,
+            outerwear=outerwear, shoes=shoe, accessory=accessory,
+        )
+        return OutfitResult(description=description, items=items_payload, image_prompt=image_prompt), outfit_items
+
+    async def generate_outfits_around_base(
+        self,
+        items: list[dict],
+        base_item_id: int,
+        occasion: str,
+        season: str,
+        count: int = 3,
+        user_id: int | None = None,
+    ) -> list[OutfitResult]:
+        """Generate count outfits where base_item is always included."""
+        filtered = _filter_items_for_context(items, occasion, season)
+
+        # Find base item
+        base_item = next((i for i in items if i.get("id") == base_item_id), None)
+        if not base_item:
+            return []
+        base_category = normalize_category(base_item.get("category"))
+        if not base_category:
+            return []
+
+        # Ensure base item is in filtered list
+        if base_item not in filtered:
+            filtered.append(base_item)
+
+        grouped: dict[str, list[dict]] = {}
+        for item in filtered:
+            category = normalize_category(item.get("category"))
+            if not category:
+                continue
+            grouped.setdefault(category, []).append(item)
+
+        results: list[OutfitResult] = []
+        used_item_ids: set[int] = set()
+
+        for index in range(count):
+            # Exclude non-base items from previous outfits
+            exclude = used_item_ids - {base_item_id}
+
+            result, outfit_items = self._build_one_outfit_with_base(
+                grouped, base_item, base_category, occasion, season, index,
+                exclude_item_ids=exclude,
+            )
+            if result is None:
+                continue
+
+            # Track used items
+            for item in outfit_items:
+                iid = item.get("id")
+                if iid:
+                    used_item_ids.add(iid)
+
+            results.append(result)
+
+        return results
+
+    @staticmethod
+    def pick_base_item(items: list[dict], season: str = "all") -> dict | None:
+        """Auto-pick the best base item by priority."""
+        by_cat: dict[str, list[dict]] = {}
+        for item in items:
+            cat = normalize_category(item.get("category"))
+            if cat:
+                by_cat.setdefault(cat, []).append(item)
+
+        # Priority: onepiece > bottom > top > outerwear (winter)
+        if "onepiece" in by_cat:
+            return random.choice(by_cat["onepiece"])
+        if "bottom" in by_cat:
+            return random.choice(by_cat["bottom"])
+        if "top" in by_cat:
+            return random.choice(by_cat["top"])
+        if season == "winter" and "outerwear" in by_cat:
+            return random.choice(by_cat["outerwear"])
+        return None
+
     async def generate_outfits(
         self,
         items: list[dict],

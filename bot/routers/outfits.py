@@ -7,8 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import (
-    after_like_keyboard, after_why_keyboard, menu_keyboard,
-    occasion_keyboard, outfit_reaction_keyboard, season_keyboard,
+    after_like_keyboard, after_why_keyboard, base_item_select_keyboard,
+    menu_keyboard, occasion_keyboard, outfit_choice_keyboard,
+    outfit_reaction_keyboard, season_keyboard,
 )
 from bot.storage import get_items, get_user_capsules, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
@@ -702,23 +703,331 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
         await state.set_state(BotStates.menu)
         return
 
-    # Авто-определение сезона по погоде
+    # Show base item selection
+    await _show_base_selection(message, state, occasion)
+
+
+async def _show_base_selection(message: Message, state: FSMContext, occasion: str) -> None:
+    """Show base item picker for multi-outfit generation."""
+    user_id = message.from_user.id if message.from_user else 0
+    items = await get_items(user_id)
+    if not items:
+        await message.answer("Гардероб пуст.", reply_markup=menu_keyboard())
+        await state.set_state(BotStates.menu)
+        return
+
+    # Filter to key base categories: onepiece, bottom, top, outerwear
+    base_candidates = [
+        it for it in items
+        if normalize_category(it.get("category")) in ("onepiece", "bottom", "top", "outerwear")
+    ]
+    if not base_candidates:
+        # Fallback: generate single outfit without base selection
+        from datetime import date
+        from services.weather_service import detect_season_for_user
+        season, weather_msg = await detect_season_for_user(user_id)
+        data = await state.get_data()
+        today = date.today().isoformat()
+        if weather_msg and data.get("last_weather_date") != today:
+            await message.answer(weather_msg)
+            await state.update_data(last_weather_date=today)
+        await _generate_and_show_outfit(message=message, state=state, occasion_code=occasion, season=season, count=1)
+        return
+
+    await state.update_data(pending_occasion=occasion)
+    await state.set_state(BotStates.menu)
+    await message.answer(
+        "Выбери базовую вещь для образов:",
+        reply_markup=base_item_select_keyboard(base_candidates, occasion),
+    )
+
+
+async def _generate_and_show_multi_outfits(
+    message: Message,
+    state: FSMContext,
+    occasion: str,
+    season: str,
+    base_item_id: int,
+    items: list[dict],
+    base_item: dict,
+) -> None:
+    """Generate 3 outfits around base and display them."""
+    # Trial gating
+    user_id = message.from_user.id if message.from_user else 0
+    await get_or_create_user(user_id)
+    allowed, reason = await can_generate_outfit(user_id)
+    if not allowed:
+        await record_paywall_hit(user_id)
+        await message.answer(
+            reason,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
+                    callback_data="pay:subscribe",
+                )],
+            ]),
+        )
+        await state.set_state(BotStates.menu)
+        return
+
+    outfits = await outfit_service.generate_outfits_around_base(
+        items=items,
+        base_item_id=base_item_id,
+        occasion=occasion,
+        season=season,
+        count=3,
+        user_id=user_id,
+    )
+
+    if not outfits:
+        await message.answer(
+            "Не удалось собрать образы вокруг этой вещи. Попробуй другую базу или добавь больше вещей.",
+            reply_markup=menu_keyboard(),
+        )
+        await state.set_state(BotStates.menu)
+        return
+
+    # Build file_id → (user_id, item_id) mapping for S3
+    s3_items: dict[str, tuple[int, int]] = {}
+    for item in items:
+        iid = item.get("id")
+        if iid and item.get("photo_url"):
+            for fid_key in ("processed_file_id", "telegram_file_id"):
+                fid = item.get(fid_key)
+                if isinstance(fid, str) and fid:
+                    s3_items[fid] = (user_id, iid)
+                    break
+
+    # Show base item info
+    base_cat_emoji = {"onepiece": "👔", "bottom": "👖", "top": "👕", "outerwear": "🧥"}.get(
+        normalize_category(base_item.get("category")), "📦"
+    )
+    base_name = base_item.get("display_name") or base_item.get("type") or "вещь"
+    base_color = base_item.get("primary_color") or ""
+    await message.answer(f"{base_cat_emoji} Базовая вещь: {base_color} {base_name}".strip())
+
+    # Store outfits in state for later pick
+    outfits_data = []
+    for i, outfit in enumerate(outfits):
+        title = f"Образ {i + 1}/{len(outfits)}:"
+        await message.answer(title)
+
+        outfit_image = await outfit_image_service.render_outfit_image(
+            bot=message.bot,
+            items_payload=outfit.items,
+            s3_items=s3_items or None,
+        )
+        if outfit_image:
+            await safe_answer_photo(message,
+                photo=BufferedInputFile(outfit_image, filename=f"outfit_{i + 1}.png"),
+            )
+        else:
+            outfit_file_ids = _collect_outfit_file_ids(outfit.items)
+            if outfit_file_ids:
+                for file_id in outfit_file_ids:
+                    await safe_answer_photo(message, photo=file_id)
+
+        if outfit.description:
+            await message.answer(outfit.description)
+
+        outfits_data.append({
+            "items_payload": outfit.items,
+            "items_details": _extract_items_details(items, outfit.items),
+            "image_prompt": outfit.image_prompt,
+        })
+
+    await state.update_data(
+        multi_outfits=outfits_data,
+        last_occasion_code=occasion,
+        last_season=season,
+        last_base_item_id=base_item_id,
+    )
+    await state.set_state(BotStates.menu)
+
+    await message.answer(
+        "Какой нравится?",
+        reply_markup=outfit_choice_keyboard(len(outfits)),
+    )
+
+    if len(outfits) < 3:
+        await message.answer(f"Показано {len(outfits)} из 3 — добавь больше вещей для разнообразия.")
+
+
+@router.callback_query(F.data.startswith("base:item:"))
+async def base_item_selected(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    item_id = int(parts[2])
+    occasion = parts[3] if len(parts) > 3 else "casual"
+
+    user_id = callback.from_user.id
+    items = await get_items(user_id)
+    base_item = next((i for i in items if i.get("id") == item_id), None)
+    if not base_item:
+        await callback.message.answer("Вещь не найдена.", reply_markup=menu_keyboard())
+        return
+
+    await callback.message.answer("Подбираю 3 образа…")
+
     from datetime import date
     from services.weather_service import detect_season_for_user
-    season, weather_msg = await detect_season_for_user(message.from_user.id)
-
+    season, weather_msg = await detect_season_for_user(user_id)
     data = await state.get_data()
     today = date.today().isoformat()
     if weather_msg and data.get("last_weather_date") != today:
-        await message.answer(weather_msg)
+        await callback.message.answer(weather_msg)
         await state.update_data(last_weather_date=today)
-    await _generate_and_show_outfit(
-        message=message,
+
+    # Filter by capsule if set
+    capsule_ids = data.get("capsule_items_ids")
+    if capsule_ids:
+        capsule_id_set = set(capsule_ids)
+        filtered_items = [it for it in items if it.get("id") in capsule_id_set]
+        await state.update_data(capsule_items_ids=None)
+        if not filtered_items:
+            filtered_items = items
+        # Ensure base item is included
+        if base_item not in filtered_items:
+            filtered_items.append(base_item)
+    else:
+        filtered_items = items
+
+    await _generate_and_show_multi_outfits(
+        message=callback.message,
         state=state,
-        occasion_code=occasion,
+        occasion=occasion,
         season=season,
-        count=1,
+        base_item_id=item_id,
+        items=filtered_items,
+        base_item=base_item,
     )
+
+
+@router.callback_query(F.data.startswith("base:auto:"))
+async def base_auto_selected(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    occasion = callback.data.split(":")[2] if len(callback.data.split(":")) > 2 else "casual"
+
+    user_id = callback.from_user.id
+    items = await get_items(user_id)
+
+    from datetime import date
+    from services.weather_service import detect_season_for_user
+    season, weather_msg = await detect_season_for_user(user_id)
+    data = await state.get_data()
+    today = date.today().isoformat()
+    if weather_msg and data.get("last_weather_date") != today:
+        await callback.message.answer(weather_msg)
+        await state.update_data(last_weather_date=today)
+
+    # Filter by capsule if set
+    capsule_ids = data.get("capsule_items_ids")
+    if capsule_ids:
+        capsule_id_set = set(capsule_ids)
+        filtered_items = [it for it in items if it.get("id") in capsule_id_set]
+        await state.update_data(capsule_items_ids=None)
+        if not filtered_items:
+            filtered_items = items
+    else:
+        filtered_items = items
+
+    base_item = outfit_service.pick_base_item(filtered_items, season)
+    if not base_item:
+        await callback.message.answer("Не удалось выбрать базовую вещь.", reply_markup=menu_keyboard())
+        return
+
+    await callback.message.answer("Подбираю 3 образа…")
+    await _generate_and_show_multi_outfits(
+        message=callback.message,
+        state=state,
+        occasion=occasion,
+        season=season,
+        base_item_id=base_item["id"],
+        items=filtered_items,
+        base_item=base_item,
+    )
+
+
+@router.callback_query(F.data.startswith("outfit:pick:"))
+async def outfit_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    """User picked one of the 3 outfits."""
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    pick_idx = int(callback.data.split(":")[2]) - 1  # 0-indexed
+    data = await state.get_data()
+    multi_outfits = data.get("multi_outfits", [])
+    occasion_code = data.get("last_occasion_code", "casual")
+    season = data.get("last_season", "all")
+
+    if pick_idx < 0 or pick_idx >= len(multi_outfits):
+        await callback.message.answer("Образ не найден.")
+        return
+
+    chosen = multi_outfits[pick_idx]
+    items_payload = chosen["items_payload"]
+    items_details = chosen["items_details"]
+    image_prompt = chosen.get("image_prompt")
+
+    # Log feedback
+    await log_outfit_feedback(
+        user_id=callback.from_user.id,
+        occasion=occasion_code,
+        season=season,
+        action="like",
+        items=items_payload,
+    )
+
+    # Remember as last outfit for why/visualize
+    await _remember_outfit(
+        state=state,
+        items_payload=items_payload,
+        items_details=items_details,
+        occasion_code=occasion_code,
+        season=season,
+        image_prompt=image_prompt,
+    )
+
+    await increment_outfit_count(callback.from_user.id)
+
+    # Save to history
+    history_ids = [fid for fids in items_payload.values() for fid in fids if fid]
+    try:
+        await save_outfit_to_history(callback.from_user.id, history_ids, occasion_code, season)
+    except Exception:
+        logging.exception("Failed to save outfit to history")
+
+    await callback.message.answer(
+        f"Отлично, образ {pick_idx + 1} сохранён! Что думаешь?",
+        reply_markup=outfit_reaction_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "outfit:change_base")
+async def change_base(callback: CallbackQuery, state: FSMContext) -> None:
+    """Change base item and regenerate."""
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    data = await state.get_data()
+    occasion = data.get("last_occasion_code") or data.get("pending_occasion") or "casual"
+    await _show_base_selection(callback.message, state, occasion)
 
 
 @router.message(BotStates.request_season, F.text)

@@ -1590,24 +1590,8 @@ async def capsule_gen_outfit(callback: CallbackQuery, state: FSMContext) -> None
     else:
         await state.update_data(capsule_items_ids=None)
 
-    from services.weather_service import detect_season_for_user
-    season, weather_msg = await detect_season_for_user(callback.from_user.id)
-    if weather_msg:
-        from datetime import date
-        data = await state.get_data()
-        today = date.today().isoformat()
-        if data.get("last_weather_date") != today:
-            await callback.message.answer(weather_msg)
-            await state.update_data(last_weather_date=today)
-
-    from bot.routers.outfits import _generate_and_show_outfit
-    await _generate_and_show_outfit(
-        message=callback.message,
-        state=state,
-        occasion_code=occasion,
-        season=season,
-        count=1,
-    )
+    from bot.routers.outfits import _show_base_selection
+    await _show_base_selection(callback.message, state, occasion)
 
 
 @router.callback_query(F.data.startswith("capsule:suggest:"))
