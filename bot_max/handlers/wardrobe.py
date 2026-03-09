@@ -5,7 +5,7 @@ import logging
 import httpx
 from maxapi import Router, F
 from maxapi.context import MemoryContext
-from maxapi.types import MessageCreated, MessageCallback, InputMediaBuffer
+from maxapi.types import MessageCreated, MessageCallback
 from maxapi.types.attachments.image import Image as MaxImage
 
 from bot.storage import add_item, get_items, get_wardrobe_stats

@@ -5,7 +5,7 @@ import random
 
 from maxapi import Router, F
 from maxapi.context import MemoryContext
-from maxapi.types import MessageCreated, MessageCallback, InputMediaBuffer
+from maxapi.types import MessageCreated, MessageCallback
 
 from bot.storage import get_items, log_outfit_feedback, save_outfit_to_history
 from bot_max.keyboards import (
@@ -175,16 +175,8 @@ async def _generate_outfit(bot, chat_id, user_id, context: MemoryContext):
     except Exception:
         logger.debug("Collage generation failed for MAX")
 
-    if collage_bytes and chat_id:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            attachments=[
-                InputMediaBuffer(buffer=collage_bytes, filename="outfit.png"),
-                outfit_reaction_keyboard(),
-            ],
-        )
-    elif chat_id:
+    # TODO: maxapi не поддерживает InputMediaBuffer — отправляем текст
+    if chat_id:
         await bot.send_message(
             chat_id=chat_id,
             text=text,
