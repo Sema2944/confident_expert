@@ -9,6 +9,17 @@ import httpx
 from config.categories import normalize_category
 from config.settings import settings
 
+OCCASION_LABELS_RU = {
+    "work_office": "Офис", "interview": "Собеседование",
+    "date": "Свидание", "party": "Вечеринка",
+    "walk": "Прогулка", "sport_active": "Спорт",
+    "going_out": "Выход", "sport_travel": "Прогулка",
+    "casual": "Повседневный",
+}
+SEASON_LABELS_RU = {
+    "winter": "Зима", "demi": "Демисезон", "summer": "Лето", "all": "Все сезоны",
+}
+
 
 @dataclass
 class OutfitResult:
@@ -372,7 +383,7 @@ class OutfitService:
         }
 
         description = (
-            f"Образ #{index + 1}: {occasion}, {season}. "
+            f"Образ {index + 1}: {OCCASION_LABELS_RU.get(occasion, occasion)} · {SEASON_LABELS_RU.get(season, season)}. "
             f"{'Платье + обувь' if use_dress else 'Верх + низ + обувь'}"
             f"{' + верхняя одежда' if outerwear else ''}"
             f"{' + аксессуары' if accessory else ''}."
@@ -582,7 +593,7 @@ class OutfitService:
 
         use_dress = dress is not None
         description = (
-            f"Образ #{index + 1}: {occasion}, {season}. "
+            f"Образ {index + 1}: {OCCASION_LABELS_RU.get(occasion, occasion)} · {SEASON_LABELS_RU.get(season, season)}. "
             f"{'Платье + обувь' if use_dress else 'Верх + низ + обувь'}"
             f"{' + верхняя одежда' if outerwear else ''}"
             f"{' + аксессуары' if accessory else ''}."

@@ -1597,7 +1597,7 @@ async def capsule_gen_outfit(callback: CallbackQuery, state: FSMContext) -> None
         await state.update_data(capsule_items_ids=None)
 
     from bot.routers.outfits import _show_base_selection
-    await _show_base_selection(callback.message, state, occasion)
+    await _show_base_selection(callback.message, state, occasion, user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("capsule:suggest:"))

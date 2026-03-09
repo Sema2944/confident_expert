@@ -707,9 +707,10 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
     await _show_base_selection(message, state, occasion)
 
 
-async def _show_base_selection(message: Message, state: FSMContext, occasion: str) -> None:
+async def _show_base_selection(message: Message, state: FSMContext, occasion: str, *, user_id: int = 0) -> None:
     """Show base item picker for multi-outfit generation."""
-    user_id = message.from_user.id if message.from_user else 0
+    if not user_id:
+        user_id = message.from_user.id if message.from_user else 0
     items = await get_items(user_id)
     if not items:
         await message.answer("Гардероб пуст.", reply_markup=menu_keyboard())
@@ -1034,7 +1035,7 @@ async def change_base(callback: CallbackQuery, state: FSMContext) -> None:
         return
     data = await state.get_data()
     occasion = data.get("last_occasion_code") or data.get("pending_occasion") or "casual"
-    await _show_base_selection(callback.message, state, occasion)
+    await _show_base_selection(callback.message, state, occasion, user_id=callback.from_user.id)
 
 
 @router.message(BotStates.request_season, F.text)
