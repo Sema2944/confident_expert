@@ -19,6 +19,7 @@ from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
 from services.outfit_service import OutfitImageService
 from services.outfit_visualization_service import describe_items_for_mannequin, generate_mannequin_image
+from bot.utils.retry import safe_answer_photo
 
 router = Router()
 outfit_service = OutfitService()
@@ -193,7 +194,7 @@ async def _generate_and_show_outfit(
             s3_items=s3_items or None,
         )
         if outfit_image:
-            await message.answer_photo(
+            await safe_answer_photo(message,
                 photo=BufferedInputFile(outfit_image, filename="outfit.png"),
             )
         else:
@@ -204,7 +205,7 @@ async def _generate_and_show_outfit(
 
             await message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
             for file_id in outfit_file_ids:
-                await message.answer_photo(photo=file_id)
+                await safe_answer_photo(message, photo=file_id)
 
         if no_outerwear_warning:
             await message.answer(
@@ -515,7 +516,7 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
         if outfit_image:
-            await callback.message.answer_photo(photo=BufferedInputFile(outfit_image, filename="outfit.png"))
+            await safe_answer_photo(callback.message, photo=BufferedInputFile(outfit_image, filename="outfit.png"))
         else:
             outfit_file_ids = _collect_outfit_file_ids(new_outfit.items)
             if not outfit_file_ids:
@@ -524,7 +525,7 @@ async def reroll_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
             await callback.message.answer("Не удалось собрать единую картинку, показываю реальные вещи по очереди:")
             for file_id in outfit_file_ids:
-                await callback.message.answer_photo(photo=file_id)
+                await safe_answer_photo(callback.message, photo=file_id)
 
         reroll_details = _extract_items_details(items, new_outfit.items)
         await _remember_outfit(
@@ -581,7 +582,7 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 generated = await image_service.generate_image(image_prompt)
                 if generated:
                     await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
-                    await callback.message.answer_photo(
+                    await safe_answer_photo(callback.message,
                         photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
                     )
                     await _log_outfit_event("outfit_visualize", callback.message)
@@ -611,7 +612,7 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 s3_items=s3_items or None,
             )
             if collage:
-                await callback.message.answer_photo(
+                await safe_answer_photo(callback.message,
                     photo=BufferedInputFile(collage, filename="outfit_collage.png"),
                     caption="⏳ Визуализация на манекене временно недоступна. Вот коллаж из ваших вещей:",
                 )
@@ -623,7 +624,7 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 generated = await image_service.generate_image(image_prompt)
                 if generated:
                     await callback.message.answer("Это стилизация по описанию. Вещи могут немного отличаться от ваших.")
-                    await callback.message.answer_photo(
+                    await safe_answer_photo(callback.message,
                         photo=BufferedInputFile(generated, filename="outfit_visualization.png"),
                     )
                     await _log_outfit_event("outfit_visualize", callback.message)
@@ -632,7 +633,7 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         quality_note = "" if is_premium else "\n\n💎 С подпиской — визуализация в премиум-качестве"
-        await callback.message.answer_photo(
+        await safe_answer_photo(callback.message,
             photo=BufferedInputFile(mannequin_image, filename="mannequin_outfit.png"),
             caption=f"✨ Твой образ на манекене — фронт и профиль{quality_note}",
         )

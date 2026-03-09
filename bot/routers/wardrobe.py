@@ -38,6 +38,7 @@ from config.categories import CATEGORY_LABELS_RU, normalize_category
 from services.ai_analyze_service import AIAnalyzeService, build_russian_item_summary
 from services.wardrobe_analysis_service import analyze_wardrobe_gaps, analyze_wardrobe_gaps_with_actions
 from services.visual_search_service import build_affiliate_link
+from bot.utils.retry import safe_answer_photo
 
 router = Router()
 
@@ -225,7 +226,7 @@ async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
         preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
         caption = _build_item_caption(item)
         if preview_file_id:
-            await message.answer_photo(
+            await safe_answer_photo(message,
                 photo=str(preview_file_id),
                 caption=caption,
                 reply_markup=_item_actions_keyboard(int(item["id"])),
@@ -402,8 +403,8 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
                 style=analysis.formality or "",
                 season=analysis.season or "",
             )
-            await message.answer_photo(
-                BufferedInputFile(card_bytes, filename="item_card.jpg"),
+            await safe_answer_photo(message,
+                photo=BufferedInputFile(card_bytes, filename="item_card.jpg"),
                 caption=summary,
                 reply_markup=confirm_ai_keyboard(),
             )
@@ -749,7 +750,7 @@ async def enhance_wardrobe_item(callback: CallbackQuery) -> None:
         await callback.message.answer("Не удалось улучшить фото. Попробуйте с другим изображением.")
         return
 
-    sent = await callback.message.answer_photo(
+    sent = await safe_answer_photo(callback.message,
         photo=BufferedInputFile(processed_image, filename=f"item_{item_id}_enhanced.jpg"),
         caption="Готово! Сохранила улучшенную версию фото.",
     )
@@ -934,7 +935,7 @@ async def _show_items_page(message: Message, items: list[dict], label: str, page
         if price:
             caption += f"\n💰 {_format_price(price)}"
         if preview_file_id:
-            await message.answer_photo(
+            await safe_answer_photo(message,
                 photo=str(preview_file_id),
                 caption=caption,
                 reply_markup=_item_actions_keyboard(int(item["id"])),
