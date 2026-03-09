@@ -354,6 +354,9 @@ def base_item_select_keyboard(items: list[dict], occasion: str) -> InlineKeyboar
         color = item.get("primary_color") or ""
         if color and is_ascii_name(color):
             color = COLOR_EN_TO_RU.get(color.lower(), color)
+        # Skip color prefix if name already contains it
+        if color and name.lower().startswith(color.lower()):
+            color = ""
         label = f"{emoji} {color} {name}".strip()[:40]
         rows.append([InlineKeyboardButton(
             text=label,

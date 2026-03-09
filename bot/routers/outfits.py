@@ -814,6 +814,9 @@ async def _generate_and_show_multi_outfits(
     base_color = base_item.get("primary_color") or ""
     if base_color and is_ascii_name(base_color):
         base_color = COLOR_EN_TO_RU.get(base_color.lower(), base_color)
+    # Skip color prefix if name already contains it
+    if base_color and base_name.lower().startswith(base_color.lower()):
+        base_color = ""
     await message.answer(f"{base_cat_emoji} Базовая вещь: {base_color} {base_name}".strip())
 
     # Store outfits in state for later pick
