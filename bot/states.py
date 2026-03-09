@@ -22,3 +22,4 @@ class BotStates(StatesGroup):
     search_mode = State()
     setting_city = State()
     check_compatibility = State()
+    capsule_create_name = State()

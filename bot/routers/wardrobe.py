@@ -18,15 +18,22 @@ from bot.keyboards import (
     after_upload_keyboard, category_keyboard, menu_keyboard, photo_upload_keyboard,
     wardrobe_view_keyboard, confirm_ai_keyboard, manual_category_keyboard,
     subcategory_keyboard, color_keyboard, season_inline_keyboard, formality_keyboard,
-    wardrobe_filter_keyboard,
+    wardrobe_filter_keyboard, capsule_list_keyboard, capsule_detail_keyboard,
+    capsule_add_item_keyboard, capsule_item_keyboard, after_upload_capsule_keyboard,
 )
 from config.settings import settings
 from bot.storage import (
     add_item,
+    add_item_to_capsule,
+    delete_capsule,
     delete_item_by_id,
+    get_capsule_by_id,
+    get_capsule_items,
     get_category_counts,
     get_items,
+    get_user_capsules,
     get_wardrobe_stats,
+    remove_item_from_capsule,
     update_display_name,
     update_item_metadata,
     update_item_price,
@@ -184,6 +191,30 @@ async def _check_first_outfit_trigger(message: Message, user_id: int) -> None:
                 [InlineKeyboardButton(text="📥 Сначала добавлю обувь", callback_data="continue_upload")],
             ]),
         )
+
+
+async def _suggest_capsules_for_item(message: Message, user_id: int, item_id: int) -> None:
+    """After uploading an item, suggest adding it to matching capsules."""
+    capsules = await get_user_capsules(user_id)
+    if not capsules:
+        await message.answer("Что дальше?", reply_markup=after_upload_keyboard())
+        return
+    # Get item details
+    items = await get_items(user_id)
+    item = next((it for it in items if it.get("id") == item_id), None)
+    if not item:
+        await message.answer("Что дальше?", reply_markup=after_upload_keyboard())
+        return
+    from services.capsule_service import suggest_capsules_for_item
+    suggestions = suggest_capsules_for_item(item)
+    matching = [c["name"] for c in capsules if c["name"] in suggestions]
+    if matching:
+        await message.answer(
+            "💊 Добавить в капсулу?",
+            reply_markup=after_upload_capsule_keyboard(matching, item_id),
+        )
+    else:
+        await message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 
 
 _CAT_EMOJI = {
@@ -540,11 +571,17 @@ async def ai_confirm_handler(callback: CallbackQuery, state: FSMContext) -> None
     if not callback.message:
         return
 
+    data = await state.get_data()
+    item_id = data.get("ai_saved_item_id")
     await state.update_data(ai_saved_item_id=None)
 
     await _check_first_outfit_trigger(callback.message, callback.from_user.id)
 
-    await callback.message.answer("Что дальше?", reply_markup=after_upload_keyboard())
+    # Suggest capsules for the new item
+    if item_id:
+        await _suggest_capsules_for_item(callback.message, callback.from_user.id, item_id)
+    else:
+        await callback.message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 
 
 @router.callback_query(F.data == "ai_manual")
@@ -1304,4 +1341,296 @@ async def cmd_style_advice(message: Message) -> None:
         await message.answer(f"💡 Советы стилиста:\n\n{advice}")
     else:
         await message.answer("Не удалось подготовить советы. Попробуй позже.")
+
+
+# ── Капсулы гардероба ──────────────────────────────────────────
+
+
+@router.message(F.text == "💊 Капсулы")
+async def capsules_menu(message: Message, state: FSMContext) -> None:
+    await state.set_state(BotStates.menu)
+    capsules = await get_user_capsules(message.from_user.id)
+    if not capsules:
+        await message.answer(
+            "💊 У тебя пока нет капсул.\n\n"
+            "Капсула — это набор вещей, объединённых стилем или поводом "
+            "(например, «Офис» или «Кэжуал»).\n\n"
+            "Нажми «🪄 Авто-создание», чтобы я проанализировал гардероб "
+            "и создал капсулы автоматически.",
+            reply_markup=capsule_list_keyboard([]),
+        )
+        return
+    await message.answer("💊 Твои капсулы:", reply_markup=capsule_list_keyboard(capsules))
+
+
+@router.callback_query(F.data == "capsule:list")
+async def capsule_list_handler(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    capsules = await get_user_capsules(callback.from_user.id)
+    await callback.message.answer("💊 Твои капсулы:", reply_markup=capsule_list_keyboard(capsules))
+
+
+@router.callback_query(F.data == "capsule:auto")
+async def capsule_auto_create(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    from services.capsule_service import auto_create_capsules
+    created = await auto_create_capsules(callback.from_user.id)
+    if not created:
+        await callback.message.answer(
+            "Не удалось создать капсулы автоматически.\n"
+            "Добавь больше вещей с разным стилем (офисный, повседневный, спортивный)."
+        )
+        return
+    lines = ["🪄 Созданы капсулы:\n"]
+    for c in created:
+        lines.append(f"{c['icon']} {c['name']} — {c['count']} вещей")
+    await callback.message.answer("\n".join(lines))
+    capsules = await get_user_capsules(callback.from_user.id)
+    await callback.message.answer("💊 Твои капсулы:", reply_markup=capsule_list_keyboard(capsules))
+
+
+@router.callback_query(F.data == "capsule:create")
+async def capsule_create_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    await state.set_state(BotStates.capsule_create_name)
+    await callback.message.answer("Введи название новой капсулы (например, «Отпуск» или «Работа»):")
+
+
+@router.message(BotStates.capsule_create_name, F.text)
+async def capsule_create_name_handler(message: Message, state: FSMContext) -> None:
+    if message.text == "🏠 Меню":
+        await state.set_state(BotStates.menu)
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
+        return
+    name = message.text.strip()[:50]
+    if not name:
+        await message.answer("Название не может быть пустым. Попробуй ещё:")
+        return
+    from bot.storage import create_capsule
+    capsule_id = await create_capsule(message.from_user.id, name)
+    await state.set_state(BotStates.menu)
+    await message.answer(f"Капсула «{name}» создана!")
+    capsules = await get_user_capsules(message.from_user.id)
+    await message.answer("💊 Твои капсулы:", reply_markup=capsule_list_keyboard(capsules))
+
+
+@router.callback_query(F.data.startswith("capsule:view:"))
+async def capsule_view(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    capsule_id = int(callback.data.split(":")[2])
+    user_id = callback.from_user.id
+    capsule = await get_capsule_by_id(user_id, capsule_id)
+    if not capsule:
+        await callback.message.answer("Капсула не найдена.")
+        return
+    items = await get_capsule_items(user_id, capsule_id)
+    icon = capsule.get("icon") or "👗"
+    name = capsule.get("name") or "Капсула"
+    if not items:
+        await callback.message.answer(
+            f"{icon} {name}\n\nКапсула пока пуста. Добавь вещи!",
+            reply_markup=capsule_detail_keyboard(capsule_id),
+        )
+        return
+    lines = [f"{icon} {name} ({len(items)} вещей)\n"]
+    for i, item in enumerate(items, 1):
+        title = _item_title(item)
+        cat = _CAT_SHORT.get(item.get("category", ""), "")
+        lines.append(f"{i}. {cat} — {title}")
+    await callback.message.answer(
+        "\n".join(lines),
+        reply_markup=capsule_detail_keyboard(capsule_id),
+    )
+
+
+@router.callback_query(F.data.startswith("capsule:delete:"))
+async def capsule_delete_handler(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    capsule_id = int(callback.data.split(":")[2])
+    deleted = await delete_capsule(callback.from_user.id, capsule_id)
+    if deleted:
+        await callback.message.answer("Капсула удалена.")
+    else:
+        await callback.message.answer("Не удалось удалить капсулу.")
+    capsules = await get_user_capsules(callback.from_user.id)
+    await callback.message.answer("💊 Твои капсулы:", reply_markup=capsule_list_keyboard(capsules))
+
+
+@router.callback_query(F.data.startswith("capsule:add:"))
+async def capsule_add_item_start(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    capsule_id = int(callback.data.split(":")[2])
+    user_id = callback.from_user.id
+
+    # Get items NOT already in this capsule
+    all_items = await get_items(user_id)
+    capsule_items = await get_capsule_items(user_id, capsule_id)
+    capsule_item_ids = {it["id"] for it in capsule_items}
+    available = [it for it in all_items if it["id"] not in capsule_item_ids]
+
+    if not available:
+        await callback.message.answer("Все вещи уже в этой капсуле!")
+        return
+
+    await callback.message.answer(
+        "Выбери вещь для добавления:",
+        reply_markup=capsule_add_item_keyboard(capsule_id, available),
+    )
+
+
+@router.callback_query(F.data.startswith("capsule:additem:"))
+async def capsule_add_item_handler(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    capsule_id = int(parts[2])
+    item_id = int(parts[3])
+    added = await add_item_to_capsule(capsule_id, item_id)
+    if added:
+        await callback.message.answer("Вещь добавлена в капсулу!")
+    else:
+        await callback.message.answer("Вещь уже в этой капсуле.")
+    # Show capsule again
+    capsule = await get_capsule_by_id(callback.from_user.id, capsule_id)
+    if capsule:
+        items = await get_capsule_items(callback.from_user.id, capsule_id)
+        icon = capsule.get("icon") or "👗"
+        name = capsule.get("name") or "Капсула"
+        lines = [f"{icon} {name} ({len(items)} вещей)\n"]
+        for i, item in enumerate(items, 1):
+            title = _item_title(item)
+            cat = _CAT_SHORT.get(item.get("category", ""), "")
+            lines.append(f"{i}. {cat} — {title}")
+        await callback.message.answer(
+            "\n".join(lines),
+            reply_markup=capsule_detail_keyboard(capsule_id),
+        )
+
+
+@router.callback_query(F.data.startswith("capsule:rmitem:"))
+async def capsule_remove_item_handler(callback: CallbackQuery) -> None:
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    capsule_id = int(parts[2])
+    item_id = int(parts[3])
+    await remove_item_from_capsule(capsule_id, item_id)
+    await callback.message.answer("Вещь убрана из капсулы.")
+    # Redirect back to capsule view
+    capsule = await get_capsule_by_id(callback.from_user.id, capsule_id)
+    if capsule:
+        items = await get_capsule_items(callback.from_user.id, capsule_id)
+        icon = capsule.get("icon") or "👗"
+        name = capsule.get("name") or "Капсула"
+        lines = [f"{icon} {name} ({len(items)} вещей)\n"]
+        for i, item in enumerate(items, 1):
+            title = _item_title(item)
+            cat = _CAT_SHORT.get(item.get("category", ""), "")
+            lines.append(f"{i}. {cat} — {title}")
+        await callback.message.answer(
+            "\n".join(lines),
+            reply_markup=capsule_detail_keyboard(capsule_id),
+        )
+
+
+@router.callback_query(F.data.startswith("capsule:outfit:"))
+async def capsule_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Generate outfit from a specific capsule."""
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    capsule_id = int(callback.data.split(":")[2])
+    user_id = callback.from_user.id
+    items = await get_capsule_items(user_id, capsule_id)
+    if len(items) < 2:
+        await callback.message.answer("В капсуле слишком мало вещей для образа. Добавь ещё!")
+        return
+    # Store capsule items in state so outfit generation uses them
+    await state.update_data(capsule_items_ids=[it["id"] for it in items])
+    from bot.keyboards import occasion_keyboard
+    await state.set_state(BotStates.request_occasion)
+    await callback.message.answer(
+        "Куда ты сегодня идёшь?\nСоберу образ из этой капсулы.",
+        reply_markup=occasion_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("capsule:gen:"))
+async def capsule_gen_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Generate outfit from capsule after occasion was already chosen."""
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    capsule_part = parts[2]  # capsule_id or "all"
+    occasion = parts[3] if len(parts) > 3 else "casual"
+
+    if capsule_part != "all":
+        capsule_id = int(capsule_part)
+        user_id = callback.from_user.id
+        items = await get_capsule_items(user_id, capsule_id)
+        if len(items) < 2:
+            await callback.message.answer("В капсуле слишком мало вещей для образа.")
+            return
+        await state.update_data(capsule_items_ids=[it["id"] for it in items])
+    else:
+        await state.update_data(capsule_items_ids=None)
+
+    from services.weather_service import detect_season_for_user
+    season, weather_msg = await detect_season_for_user(callback.from_user.id)
+    if weather_msg:
+        from datetime import date
+        data = await state.get_data()
+        today = date.today().isoformat()
+        if data.get("last_weather_date") != today:
+            await callback.message.answer(weather_msg)
+            await state.update_data(last_weather_date=today)
+
+    from bot.routers.outfits import _generate_and_show_outfit
+    await _generate_and_show_outfit(
+        message=callback.message,
+        state=state,
+        occasion_code=occasion,
+        season=season,
+        count=1,
+    )
+
+
+@router.callback_query(F.data.startswith("capsule:suggest:"))
+async def capsule_suggest_handler(callback: CallbackQuery) -> None:
+    """Handle post-upload capsule suggestion."""
+    await _safe_answer(callback)
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    if parts[2] == "skip":
+        await callback.message.answer("Что дальше?", reply_markup=after_upload_keyboard())
+        return
+    item_id = int(parts[2])
+    capsule_name = parts[3] if len(parts) > 3 else ""
+
+    # Find capsule by name
+    capsules = await get_user_capsules(callback.from_user.id)
+    capsule = next((c for c in capsules if c["name"] == capsule_name), None)
+    if capsule:
+        added = await add_item_to_capsule(capsule["id"], item_id)
+        if added:
+            await callback.message.answer(f"Добавлено в капсулу «{capsule_name}»!")
+        else:
+            await callback.message.answer("Вещь уже в этой капсуле.")
+    await callback.message.answer("Что дальше?", reply_markup=after_upload_keyboard())
 

@@ -10,7 +10,7 @@ from bot.keyboards import (
     after_like_keyboard, after_why_keyboard, menu_keyboard,
     occasion_keyboard, outfit_reaction_keyboard, season_keyboard,
 )
-from bot.storage import get_items, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
+from bot.storage import get_items, get_user_capsules, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
 from config.categories import normalize_category
 from config.settings import settings
@@ -117,14 +117,26 @@ async def _generate_and_show_outfit(
         await state.set_state(BotStates.menu)
         return
 
-    items = await get_items(message.from_user.id)
-    if not items:
+    all_items = await get_items(message.from_user.id)
+    if not all_items:
         await message.answer(
             "Гардероб пуст. Добавь верх, низ и обувь — и я соберу первый образ.",
             reply_markup=menu_keyboard(),
         )
         await state.set_state(BotStates.menu)
         return
+
+    # Filter by capsule if selected
+    data = await state.get_data()
+    capsule_ids = data.get("capsule_items_ids")
+    if capsule_ids:
+        capsule_id_set = set(capsule_ids)
+        items = [it for it in all_items if it.get("id") in capsule_id_set]
+        await state.update_data(capsule_items_ids=None)
+        if not items:
+            items = all_items
+    else:
+        items = all_items
 
     categories_present = {item.get("category") for item in items}
     has_full_outfit = (
@@ -677,6 +689,17 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
     occasion = OCCASIONS.get(message.text)
     if not occasion:
         await message.answer("Не понял повод. Выберите кнопку.")
+        return
+
+    # Check if user has capsules — offer selection
+    capsules = await get_user_capsules(message.from_user.id)
+    if capsules:
+        from bot.keyboards import capsule_select_keyboard
+        await message.answer(
+            "Собрать из капсулы или всего гардероба?",
+            reply_markup=capsule_select_keyboard(capsules, occasion),
+        )
+        await state.set_state(BotStates.menu)
         return
 
     # Авто-определение сезона по погоде

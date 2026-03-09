@@ -199,6 +199,20 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     new_subscriptions INTEGER DEFAULT 0,
     errors_count INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS wardrobe_capsules (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    name TEXT NOT NULL,
+    icon TEXT DEFAULT '👗',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS capsule_items (
+    capsule_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    PRIMARY KEY (capsule_id, item_id)
+);
 """
 
 
@@ -332,6 +346,27 @@ async def _init_sqlite() -> None:
 
         if "survey_shown_at" not in user_cols:
             await connection.execute("ALTER TABLE user_profiles ADD COLUMN survey_shown_at DATETIME")
+
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS wardrobe_capsules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                icon TEXT DEFAULT '👗',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS capsule_items (
+                capsule_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                PRIMARY KEY (capsule_id, item_id)
+            )
+            """
+        )
 
         await connection.commit()
 
@@ -920,3 +955,120 @@ async def get_stats_for_daily_report() -> dict:
         "new_subscriptions": today_row["new_subscriptions"] if today_row else 0,
         "errors_count": today_row["errors_count"] if today_row else 0,
     }
+
+
+# ─── Capsule CRUD ──────────────────────────────────────────────
+
+
+async def create_capsule(user_id: int, name: str, icon: str = "👗") -> int:
+    """Create a capsule and return its id."""
+    if _USE_PG:
+        async with _connect() as db:
+            row_id = await db.fetchval(
+                "INSERT INTO wardrobe_capsules (user_id, name, icon) "
+                "VALUES ($1, $2, $3) RETURNING id",
+                (user_id, name, icon),
+            )
+            return int(row_id)
+    else:
+        async with _connect() as db:
+            await db.execute(
+                "INSERT INTO wardrobe_capsules (user_id, name, icon) VALUES (?, ?, ?)",
+                (user_id, name, icon),
+            )
+            await db.commit()
+            return int(db.lastrowid)
+
+
+async def get_user_capsules(user_id: int) -> list[dict]:
+    """Return all capsules for a user with item counts."""
+    async with _connect() as db:
+        rows = await db.fetch(
+            "SELECT c.id, c.name, c.icon, c.created_at, "
+            f"(SELECT COUNT(*) FROM capsule_items ci WHERE ci.capsule_id = c.id) as item_count "
+            f"FROM wardrobe_capsules c WHERE c.user_id = {_ph(1)} ORDER BY c.created_at",
+            (user_id,),
+        )
+        return rows
+
+
+async def get_capsule_by_id(user_id: int, capsule_id: int) -> dict | None:
+    """Return a single capsule if it belongs to user."""
+    async with _connect() as db:
+        return await db.fetchone(
+            f"SELECT id, name, icon, created_at FROM wardrobe_capsules "
+            f"WHERE id = {_ph(1)} AND user_id = {_ph(2)}",
+            (capsule_id, user_id),
+        )
+
+
+async def add_item_to_capsule(capsule_id: int, item_id: int) -> bool:
+    """Add an item to a capsule. Returns False if already exists."""
+    async with _connect() as db:
+        try:
+            await db.execute(
+                f"INSERT INTO capsule_items (capsule_id, item_id) VALUES ({_ph(1)}, {_ph(2)})",
+                (capsule_id, item_id),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def remove_item_from_capsule(capsule_id: int, item_id: int) -> bool:
+    """Remove an item from a capsule."""
+    async with _connect() as db:
+        result = await db.execute(
+            f"DELETE FROM capsule_items WHERE capsule_id = {_ph(1)} AND item_id = {_ph(2)}",
+            (capsule_id, item_id),
+        )
+        await db.commit()
+        return True
+
+
+async def get_capsule_items(user_id: int, capsule_id: int) -> list[dict]:
+    """Return all wardrobe items in a capsule."""
+    async with _connect() as db:
+        rows = await db.fetch(
+            f"SELECT {_ITEM_COLS} FROM wardrobe_items w "
+            f"JOIN capsule_items ci ON ci.item_id = w.id "
+            f"WHERE ci.capsule_id = {_ph(1)} AND w.user_id = {_ph(2)} "
+            f"ORDER BY w.created_at DESC",
+            (capsule_id, user_id),
+        )
+        return [_build_item_payload(r) for r in rows]
+
+
+async def delete_capsule(user_id: int, capsule_id: int) -> bool:
+    """Delete a capsule and its item associations."""
+    async with _connect() as db:
+        # Verify ownership
+        owner = await db.fetchone(
+            f"SELECT id FROM wardrobe_capsules WHERE id = {_ph(1)} AND user_id = {_ph(2)}",
+            (capsule_id, user_id),
+        )
+        if not owner:
+            return False
+        await db.execute(
+            f"DELETE FROM capsule_items WHERE capsule_id = {_ph(1)}",
+            (capsule_id,),
+        )
+        await db.execute(
+            f"DELETE FROM wardrobe_capsules WHERE id = {_ph(1)}",
+            (capsule_id,),
+        )
+        await db.commit()
+        return True
+
+
+async def rename_capsule(user_id: int, capsule_id: int, new_name: str) -> bool:
+    """Rename a capsule."""
+    async with _connect() as db:
+        result = await db.execute(
+            f"UPDATE wardrobe_capsules SET name = {_ph(1)} "
+            f"WHERE id = {_ph(2)} AND user_id = {_ph(3)}",
+            (new_name, capsule_id, user_id),
+        )
+        await db.commit()
+        return True

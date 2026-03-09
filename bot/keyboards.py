@@ -11,7 +11,7 @@ def menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="✨ Собрать образ")],
             [KeyboardButton(text="👗 Мой гардероб"), KeyboardButton(text="📥 Добавить вещь")],
-            [KeyboardButton(text="🔥 Тренды"), KeyboardButton(text="💎 Подписка")],
+            [KeyboardButton(text="💊 Капсулы"), KeyboardButton(text="🔥 Тренды"), KeyboardButton(text="💎 Подписка")],
         ],
         resize_keyboard=True,
     )
@@ -221,3 +221,96 @@ def location_request_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
+
+
+# ── Capsule keyboards ──────────────────────────────────────────
+
+
+def capsule_list_keyboard(capsules: list[dict]) -> InlineKeyboardMarkup:
+    """List of user capsules + management buttons."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for cap in capsules:
+        icon = cap.get("icon") or "👗"
+        name = cap.get("name") or "Капсула"
+        count = cap.get("item_count", 0)
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {name} ({count})",
+            callback_data=f"capsule:view:{cap['id']}",
+        )])
+    rows.append([
+        InlineKeyboardButton(text="🪄 Авто-создание", callback_data="capsule:auto"),
+        InlineKeyboardButton(text="➕ Создать", callback_data="capsule:create"),
+    ])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def capsule_detail_keyboard(capsule_id: int) -> InlineKeyboardMarkup:
+    """Actions for a single capsule."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✨ Образ из капсулы", callback_data=f"capsule:outfit:{capsule_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="➕ Добавить вещь", callback_data=f"capsule:add:{capsule_id}"),
+            InlineKeyboardButton(text="🗑 Удалить капсулу", callback_data=f"capsule:delete:{capsule_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="💊 К капсулам", callback_data="capsule:list"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+        ],
+    ])
+
+
+def capsule_select_keyboard(capsules: list[dict], occasion: str) -> InlineKeyboardMarkup:
+    """Select capsule for outfit generation (shown before generating)."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for cap in capsules:
+        icon = cap.get("icon") or "👗"
+        name = cap.get("name") or "Капсула"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {name}",
+            callback_data=f"capsule:gen:{cap['id']}:{occasion}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="📋 Весь гардероб",
+        callback_data=f"capsule:gen:all:{occasion}",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def capsule_add_item_keyboard(capsule_id: int, items: list[dict]) -> InlineKeyboardMarkup:
+    """Pick items to add to a capsule (show first 10)."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in items[:10]:
+        name = item.get("display_name") or item.get("type") or "вещь"
+        rows.append([InlineKeyboardButton(
+            text=f"{name}",
+            callback_data=f"capsule:additem:{capsule_id}:{item['id']}",
+        )])
+    rows.append([
+        InlineKeyboardButton(text="💊 Назад к капсуле", callback_data=f"capsule:view:{capsule_id}"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def capsule_item_keyboard(capsule_id: int, item_id: int) -> InlineKeyboardMarkup:
+    """Remove item from capsule."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Убрать из капсулы", callback_data=f"capsule:rmitem:{capsule_id}:{item_id}")],
+        [InlineKeyboardButton(text="💊 Назад к капсуле", callback_data=f"capsule:view:{capsule_id}")],
+    ])
+
+
+def after_upload_capsule_keyboard(capsule_names: list[str], item_id: int) -> InlineKeyboardMarkup:
+    """Suggest adding newly uploaded item to capsules."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for name in capsule_names[:3]:
+        rows.append([InlineKeyboardButton(
+            text=f"➕ В капсулу «{name}»",
+            callback_data=f"capsule:suggest:{item_id}:{name}",
+        )])
+    rows.append([
+        InlineKeyboardButton(text="⏩ Пропустить", callback_data="capsule:suggest:skip"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
