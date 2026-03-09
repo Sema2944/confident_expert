@@ -1064,8 +1064,7 @@ async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
 
     _CAT_EMOJI = {"top": "👕", "bottom": "👖", "outerwear": "🧥", "shoes": "👟", "onepiece": "👔", "accessories": "🧢"}
 
-    rows: list[list[InlineKeyboardButton]] = []
-    text_lines = ["🛒 Похожие вещи в магазинах:\n"]
+    await callback.message.answer("🛒 Похожие вещи в магазинах:")
 
     for cat, detail in items_details.items():
         display = detail.get("display_name") or ""
@@ -1084,15 +1083,9 @@ async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 label = ru_type or ru_color or display or cat
             label = label.strip()
 
-        # Build search query
-        query = label
-        gender = "женский"
-        search_q = f"{query} {gender}".strip()
-
+        search_q = f"{label} женский".strip()
         emoji = _CAT_EMOJI.get(cat, "📦")
-        text_lines.append(f"{emoji} {label}")
 
-        # One row of store buttons per item
         store_row = []
         for store_key, store_info in STORES.items():
             url = build_affiliate_link(store_key, search_q)
@@ -1102,14 +1095,10 @@ async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                     url=url,
                 ))
         if store_row:
-            rows.append(store_row)
-
-    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
-
-    await callback.message.answer(
-        "\n".join(text_lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-    )
+            await callback.message.answer(
+                f"🔍 {emoji} {label}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[store_row]),
+            )
 
 
 @router.callback_query(F.data == "outfit:change_base")
