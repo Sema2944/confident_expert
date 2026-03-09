@@ -504,6 +504,12 @@ async def upload_photo(message: Message, state: FSMContext) -> None:
                 "gender_hint": analysis.gender_hint or "unknown",
             },
         )
+        if analysis.display_name:
+            await update_display_name(
+                user_id=message.from_user.id,
+                item_id=item_id,
+                display_name=analysis.display_name,
+            )
         await state.update_data(ai_saved_item_id=item_id)
 
         # Upload compressed photo to S3 (non-blocking: errors don't break flow)

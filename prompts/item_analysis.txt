@@ -11,6 +11,7 @@ Return JSON in EXACT format:
 {
   "category": "top|bottom|outerwear|shoes|dress|accessory",
   "type": "string|null",
+  "display_name": "string на русском языке",
   "primary_color": "string|null",
   "secondary_color": "string|null",
   "pattern": "solid|stripe|check|print|unknown",
@@ -22,7 +23,8 @@ Return JSON in EXACT format:
 
 Rules:
 - category must be one of the allowed enum values.
-- type should be short and generic (e.g., "blazer", "turtleneck", "jeans", "sneakers", "handbag").
+- type should be short and generic in English (e.g., "blazer", "turtleneck", "jeans", "sneakers", "handbag").
+- display_name should be a short human-readable name in RUSSIAN (e.g., "Белая футболка", "Чёрные джинсы", "Кожаная куртка"). Combine color + type in Russian.
 - Do NOT guess brands.
 - If the image is ambiguous, prefer "unknown" rather than inventing details.
 - If the item looks usable by any gender, set gender_hint to "unisex".
