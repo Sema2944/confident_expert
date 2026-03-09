@@ -680,10 +680,15 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
         return
 
     # Авто-определение сезона по погоде
+    from datetime import date
     from services.weather_service import detect_season_for_user
     season, weather_msg = await detect_season_for_user(message.from_user.id)
 
-    await message.answer(weather_msg)
+    data = await state.get_data()
+    today = date.today().isoformat()
+    if weather_msg and data.get("last_weather_date") != today:
+        await message.answer(weather_msg)
+        await state.update_data(last_weather_date=today)
     await _generate_and_show_outfit(
         message=message,
         state=state,
