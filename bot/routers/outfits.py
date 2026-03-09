@@ -802,7 +802,14 @@ async def _generate_and_show_multi_outfits(
     base_cat_emoji = {"onepiece": "👔", "bottom": "👖", "top": "👕", "outerwear": "🧥"}.get(
         normalize_category(base_item.get("category")), "📦"
     )
+    from bot.utils.translate import is_ascii_name, translate_display_name
     base_name = base_item.get("display_name") or base_item.get("type") or "вещь"
+    if is_ascii_name(base_name):
+        base_name = translate_display_name(
+            base_name,
+            primary_color=base_item.get("primary_color"),
+            item_type=base_item.get("type"),
+        ) or base_name
     base_color = base_item.get("primary_color") or ""
     await message.answer(f"{base_cat_emoji} Базовая вещь: {base_color} {base_name}".strip())
 

@@ -7,6 +7,9 @@ import httpx
 
 from config.categories import CATEGORY_LABELS_RU
 from config.settings import settings
+from bot.utils.translate import (
+    EN_TO_RU, COLOR_EN_TO_RU, is_cyrillic, translate_display_name,
+)
 
 
 @dataclass
@@ -20,99 +23,6 @@ class ItemAnalysis:
     formality: str | None = None
     gender_hint: str | None = None
     photo_quality: str | None = None
-
-
-_EN_TO_RU: dict[str, str] = {
-    # tops
-    "t-shirt": "футболка", "tee": "футболка", "shirt": "рубашка",
-    "blouse": "блузка", "polo": "поло", "tank top": "майка",
-    "sweater": "свитер", "pullover": "пуловер", "hoodie": "худи",
-    "sweatshirt": "свитшот", "cardigan": "кардиган",
-    "turtleneck": "водолазка", "crop top": "кроп-топ", "top": "топ",
-    "vest": "жилет", "tunic": "туника", "henley": "хенли",
-    # bottoms
-    "jeans": "джинсы", "pants": "брюки", "trousers": "брюки",
-    "shorts": "шорты", "skirt": "юбка", "leggings": "леггинсы",
-    "joggers": "джоггеры", "chinos": "чиносы", "culottes": "кюлоты",
-    "cargo pants": "карго-брюки", "cargo": "карго",
-    # outerwear
-    "jacket": "куртка", "coat": "пальто", "blazer": "блейзер",
-    "parka": "парка", "bomber": "бомбер", "bomber jacket": "бомбер",
-    "denim jacket": "джинсовая куртка", "leather jacket": "кожаная куртка",
-    "down jacket": "пуховик", "puffer": "пуховик", "puffer jacket": "пуховик",
-    "trench": "тренч", "trench coat": "тренч", "windbreaker": "ветровка",
-    "raincoat": "дождевик", "fur coat": "шуба", "overcoat": "пальто",
-    # onepiece / dresses
-    "dress": "платье", "jumpsuit": "комбинезон", "romper": "ромпер",
-    "overall": "комбинезон", "overalls": "комбинезон",
-    "sundress": "сарафан", "gown": "платье",
-    # shoes
-    "sneakers": "кроссовки", "boots": "ботинки", "ankle boots": "ботильоны",
-    "sandals": "сандалии", "loafers": "лоферы", "heels": "туфли на каблуке",
-    "flats": "балетки", "mules": "мюли", "slides": "шлёпанцы",
-    "slippers": "тапочки", "oxfords": "оксфорды", "derby": "дерби",
-    "pumps": "туфли-лодочки", "chelsea boots": "челси",
-    "running shoes": "беговые кроссовки", "trainers": "кроссовки",
-    "flip flops": "вьетнамки", "espadrilles": "эспадрильи",
-    "ugg boots": "угги", "uggs": "угги",
-    # accessories
-    "bag": "сумка", "handbag": "сумка", "backpack": "рюкзак",
-    "clutch": "клатч", "belt": "ремень", "scarf": "шарф",
-    "hat": "шляпа", "cap": "кепка", "beanie": "шапка",
-    "gloves": "перчатки", "sunglasses": "солнцезащитные очки",
-    "watch": "часы", "bracelet": "браслет", "necklace": "колье",
-    "earrings": "серьги", "ring": "кольцо", "tie": "галстук",
-    "bow tie": "бабочка", "pocket square": "платок",
-    "tote": "тоут", "crossbody": "кроссбоди",
-}
-
-_COLOR_EN_TO_RU: dict[str, str] = {
-    "white": "белый", "black": "чёрный", "red": "красный",
-    "blue": "синий", "navy": "тёмно-синий", "green": "зелёный",
-    "yellow": "жёлтый", "orange": "оранжевый", "pink": "розовый",
-    "purple": "фиолетовый", "gray": "серый", "grey": "серый",
-    "brown": "коричневый", "beige": "бежевый", "cream": "кремовый",
-    "burgundy": "бордовый", "olive": "оливковый", "khaki": "хаки",
-    "coral": "коралловый", "turquoise": "бирюзовый", "teal": "бирюзовый",
-    "lavender": "лавандовый", "maroon": "бордовый", "tan": "рыжеватый",
-    "ivory": "слоновая кость", "gold": "золотой", "silver": "серебряный",
-    "light blue": "голубой", "dark blue": "тёмно-синий",
-    "dark green": "тёмно-зелёный", "light green": "светло-зелёный",
-}
-
-
-def _is_cyrillic(text: str) -> bool:
-    """Check if the text contains at least one Cyrillic character."""
-    return any("\u0400" <= ch <= "\u04ff" for ch in text)
-
-
-def _translate_display_name(raw_name: str | None, primary_color: str | None, item_type: str | None) -> str | None:
-    """Translate display_name to Russian if it came back in English."""
-    if raw_name and _is_cyrillic(raw_name):
-        return raw_name
-
-    # Build Russian name from color + type
-    type_str = (item_type or "").strip().lower()
-    color_str = (primary_color or "").strip().lower()
-
-    ru_type = _EN_TO_RU.get(type_str)
-    ru_color = _COLOR_EN_TO_RU.get(color_str)
-
-    if not ru_type:
-        # Try raw_name as type fallback
-        if raw_name:
-            name_lower = raw_name.strip().lower()
-            ru_type = _EN_TO_RU.get(name_lower)
-
-    if ru_type and ru_color:
-        return f"{ru_color.capitalize()} {ru_type}"
-    if ru_type:
-        return ru_type.capitalize()
-
-    # If we got a Russian raw_name from AI but _is_cyrillic missed it, or unknown
-    if raw_name and raw_name.strip():
-        return raw_name.strip()
-    return None
 
 
 class AIAnalyzeService:
@@ -211,7 +121,7 @@ class AIAnalyzeService:
         item_type = self._normalize_text(payload.get("type"))
         primary_color = self._normalize_text(payload.get("primary_color"))
         raw_display = payload.get("display_name")
-        display_name = _translate_display_name(raw_display, primary_color, item_type)
+        display_name = translate_display_name(raw_display, primary_color, item_type)
 
         return ItemAnalysis(
             type=item_type,
@@ -307,12 +217,12 @@ def build_russian_item_summary(category: str, analysis: ItemAnalysis) -> str:
 
     item_type = analysis.type
     if item_type and item_type != "unknown":
-        ru_type = _EN_TO_RU.get(item_type.lower(), item_type)
+        ru_type = EN_TO_RU.get(item_type.lower(), item_type)
         lines.append(f"• Тип: {ru_type}")
 
     color = analysis.primary_color
     if color and color != "unknown":
-        ru_color = _COLOR_EN_TO_RU.get(color.lower(), color)
+        ru_color = COLOR_EN_TO_RU.get(color.lower(), color)
         lines.append(f"• Цвет: {ru_color}")
 
     pattern = analysis.pattern

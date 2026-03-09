@@ -371,11 +371,47 @@ async def _init_sqlite() -> None:
         await connection.commit()
 
 
+async def _migrate_display_names() -> None:
+    """One-time migration: translate English display_name to Russian."""
+    from bot.utils.translate import is_ascii_name, translate_display_name
+
+    async with _connect() as db:
+        rows = await db.fetch(
+            "SELECT id, user_id, display_name, metadata_json FROM wardrobe_items "
+            "WHERE display_name IS NOT NULL"
+        )
+
+    updates: list[tuple] = []
+    for row in rows:
+        name = row["display_name"]
+        if not name or not is_ascii_name(name):
+            continue
+        metadata = json.loads(row["metadata_json"])
+        translated = translate_display_name(
+            name,
+            primary_color=metadata.get("primary_color"),
+            item_type=metadata.get("type"),
+        )
+        if translated and translated != name:
+            updates.append((translated, row["id"]))
+
+    if updates:
+        async with _connect() as db:
+            for translated, item_id in updates:
+                await db.execute(
+                    f"UPDATE wardrobe_items SET display_name = {_ph(1)} WHERE id = {_ph(2)}",
+                    (translated, item_id),
+                )
+            await db.commit()
+        logger.info("Migrated %d display_name(s) to Russian", len(updates))
+
+
 async def init_storage() -> None:
     if _USE_PG:
         await _init_pg()
     else:
         await _init_sqlite()
+    await _migrate_display_names()
 
 
 # ─── Outfit Feedback ─────────────────────────────────────────────
@@ -464,13 +500,22 @@ async def add_item(
 
 
 def _build_item_payload(row: dict) -> dict[str, str | int | None]:
+    from bot.utils.translate import is_ascii_name, translate_display_name
+
     metadata = json.loads(row["metadata_json"])
+    display_name = row.get("display_name") or ""
+    if display_name and is_ascii_name(display_name):
+        display_name = translate_display_name(
+            display_name,
+            primary_color=metadata.get("primary_color"),
+            item_type=metadata.get("type"),
+        ) or display_name
     return {
         "id": row["id"],
         "category": row["category"],
         "telegram_file_id": row["telegram_file_id"],
         "processed_file_id": row.get("processed_file_id"),
-        "display_name": row.get("display_name"),
+        "display_name": display_name or None,
         "price": row.get("price") or 0,
         "created_at": str(row["created_at"]) if row.get("created_at") else None,
         "photo_url": row.get("photo_url"),
