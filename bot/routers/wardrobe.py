@@ -186,56 +186,168 @@ async def _check_first_outfit_trigger(message: Message, user_id: int) -> None:
         )
 
 
-async def _render_wardrobe_cards(message: Message, user_id: int) -> None:
+_CAT_EMOJI = {
+    "top": "👕", "bottom": "👖", "outerwear": "🧥",
+    "shoes": "👟", "accessories": "🧢", "onepiece": "👔",
+}
+_CAT_SHORT = {
+    "top": "Верх", "bottom": "Низ", "outerwear": "Верхняя",
+    "shoes": "Обувь", "accessories": "Аксессуары", "onepiece": "Цельный",
+}
+_WARDROBE_PAGE_SIZE = 5
+
+
+def _wardrobe_categories_keyboard(cat_counts: dict[str, int]) -> InlineKeyboardMarkup:
+    """Inline-клавиатура с категориями гардероба."""
+    rows: list[list[InlineKeyboardButton]] = []
+    cats = list(cat_counts.items())
+    for i in range(0, len(cats), 2):
+        row = []
+        for cat, cnt in cats[i:i + 2]:
+            emoji = _CAT_EMOJI.get(cat, "📦")
+            short = _CAT_SHORT.get(cat, cat)
+            row.append(InlineKeyboardButton(
+                text=f"{emoji} {short} ({cnt})",
+                callback_data=f"wardrobe:cat:{cat}",
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="📊 Все вещи", callback_data="wardrobe:all"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _wardrobe_page_keyboard(category: str | None, page: int, total: int) -> InlineKeyboardMarkup:
+    """Пагинация для списка вещей в гардеробе."""
+    total_pages = (total + _WARDROBE_PAGE_SIZE - 1) // _WARDROBE_PAGE_SIZE
+    nav_row: list[InlineKeyboardButton] = []
+    cat_part = category or "all"
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"wardrobe:page:{cat_part}:{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="▶️ Дальше", callback_data=f"wardrobe:page:{cat_part}:{page + 1}"))
+    rows = []
+    if nav_row:
+        rows.append(nav_row)
+    rows.append([
+        InlineKeyboardButton(text="👗 К категориям", callback_data="wardrobe:back"),
+        InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _item_line(idx: int, item: dict) -> str:
+    """Одна строка вещи в текстовом списке."""
+    title = _item_title(item)
+    color = item.get("primary_color") or ""
+    formality = _FORMALITY_SHORT_RU.get(str(item.get("formality") or ""), "")
+    season = _SEASON_SHORT_RU.get(str(item.get("season") or ""), "")
+    parts = [p for p in [color, formality, season] if p and p != "unknown"]
+    detail = " · ".join(parts)
+    suffix = f" — {detail}" if detail else ""
+    return f"{idx}. {title}{suffix}"
+
+
+def _item_detail_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для карточки конкретной вещи."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"item:delete:{item_id}"),
+            InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"item:rename:{item_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔍 Найти похожее", callback_data=f"find_similar:{item_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="👗 К категориям", callback_data="wardrobe:back"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),
+        ],
+    ])
+
+
+async def _render_wardrobe_overview(message: Message, user_id: int) -> None:
+    """Показать статистику гардероба + кнопки категорий (без фото)."""
     items = await get_items(user_id)
     if not items:
         await message.answer("Гардероб пока пуст. Нажмите '📥 Добавить вещь' и добавьте вещи.")
         return
 
     stats = await get_wardrobe_stats(user_id)
-    lines = ["👗 Твой гардероб", ""]
-    lines.append(f"📦 {stats['total_items']} вещей на сумму {_format_price(stats['total_value'])}")
+    total = stats["total_items"]
+    w = "вещь" if total % 10 == 1 and total % 100 != 11 else (
+        "вещи" if 2 <= total % 10 <= 4 and not 12 <= total % 100 <= 14 else "вещей"
+    )
 
+    lines = [f"👗 Твой гардероб ({total} {w})", ""]
+
+    cat_counts: dict[str, int] = {}
     if stats["categories"]:
-        lines.append("📊 По категориям:")
         for cat, info in stats["categories"].items():
-            cat_label = CATEGORY_LABELS_RU.get(cat, cat)
-            lines.append(f"  {cat_label}: {info['count']} ({_format_price(info['value'])})")
+            cnt = info["count"]
+            cat_counts[cat] = cnt
+            emoji = _CAT_EMOJI.get(cat, "📦")
+            label = _CAT_SHORT.get(cat, cat)
+            lines.append(f"{emoji} {label}: {cnt} шт.")
 
-    if stats["most_expensive"]:
-        name = stats["most_expensive"].get("display_name") or "Без названия"
-        price = stats["most_expensive"].get("price", 0)
-        lines.append(f"\n👑 Самая дорогая: {name} — {_format_price(price)}")
+    lines.append("")
+    lines.append("Выбери категорию чтобы посмотреть вещи:")
 
-    gaps_text, gap_actions = analyze_wardrobe_gaps_with_actions(items)
-    gaps_markup = None
-    if gaps_text:
-        lines.append("")
-        lines.append(gaps_text)
-    if gap_actions:
-        gap_buttons = [
-            [InlineKeyboardButton(text=a["label"], url=build_affiliate_link("wildberries", a["query"]))]
-            for a in gap_actions
-        ]
-        gaps_markup = InlineKeyboardMarkup(inline_keyboard=gap_buttons)
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=_wardrobe_categories_keyboard(cat_counts),
+    )
 
-    await message.answer("\n".join(lines), reply_markup=gaps_markup)
-    await message.answer("Фильтры и сортировка:", reply_markup=wardrobe_filter_keyboard())
 
-    for item in items:
-        preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
-        caption = _build_item_caption(item)
-        if preview_file_id:
-            await safe_answer_photo(message,
-                photo=str(preview_file_id),
-                caption=caption,
-                reply_markup=_item_actions_keyboard(int(item["id"])),
+async def _render_wardrobe_page(message: Message, user_id: int, category: str | None, page: int) -> None:
+    """Показать страницу вещей (текст, без фото)."""
+    items = await get_items(user_id)
+    if category:
+        items = [i for i in items if i.get("category") == category]
+
+    total = len(items)
+    if not items:
+        label = CATEGORY_LABELS_RU.get(category, category) if category else "Все вещи"
+        await message.answer(f"{label}: пусто")
+        return
+
+    total_pages = (total + _WARDROBE_PAGE_SIZE - 1) // _WARDROBE_PAGE_SIZE
+    start = page * _WARDROBE_PAGE_SIZE
+    page_items = items[start:start + _WARDROBE_PAGE_SIZE]
+
+    if category:
+        emoji = _CAT_EMOJI.get(category, "📦")
+        label = CATEGORY_LABELS_RU.get(category, category)
+        header = f"{emoji} {label} ({total} вещей) — стр. {page + 1}/{total_pages}"
+    else:
+        header = f"📊 Все вещи ({total}) — стр. {page + 1}/{total_pages}"
+
+    lines = [header, ""]
+    for i, item in enumerate(page_items, start=start + 1):
+        item_id = item.get("id")
+        line = _item_line(i, item)
+        lines.append(line)
+        # Add inline button to view item detail
+        lines.append(f"   → /item_{item_id}")
+
+    # Item buttons for quick access
+    item_buttons: list[list[InlineKeyboardButton]] = []
+    for item in page_items:
+        item_id = int(item["id"])
+        title = _item_title(item)
+        item_buttons.append([
+            InlineKeyboardButton(
+                text=f"📋 {title[:30]}",
+                callback_data=f"wardrobe:item:{item_id}",
             )
-        else:
-            await message.answer(
-                f"📸 Фото недоступно\n{caption}",
-                reply_markup=_item_actions_keyboard(int(item["id"])),
-            )
+        ])
+
+    nav_kb = _wardrobe_page_keyboard(category, page, total)
+    # Merge item buttons + nav buttons
+    all_buttons = item_buttons + nav_kb.inline_keyboard
+    kb = InlineKeyboardMarkup(inline_keyboard=all_buttons)
+
+    await message.answer("\n".join(lines), reply_markup=kb)
 
 
 @router.message(F.text == "📸 Загрузить гардероб")
@@ -660,8 +772,7 @@ async def upload_photo_prompt(message: Message) -> None:
 @router.message(F.text.in_({"👗 Мой гардероб", "🧺 Мой гардероб", "🧺 Гардероб"}))
 async def wardrobe_list(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.wardrobe_view)
-    await _render_wardrobe_cards(message=message, user_id=message.from_user.id)
-    await message.answer("Нажмите 🏠 Меню, чтобы вернуться.", reply_markup=wardrobe_view_keyboard())
+    await _render_wardrobe_overview(message=message, user_id=message.from_user.id)
 
 
 @router.callback_query(F.data.startswith("item:delete:"))
@@ -701,7 +812,7 @@ async def delete_wardrobe_item(callback: CallbackQuery, state: FSMContext) -> No
         await callback.message.answer("Гардероб теперь пуст.", reply_markup=menu_keyboard())
         return
 
-    await _render_wardrobe_cards(callback.message, callback.from_user.id)
+    await _render_wardrobe_overview(callback.message, callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("item:delete_cancel:"))
@@ -840,7 +951,7 @@ async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
         return
 
     await message.answer("Название обновлено.")
-    await _render_wardrobe_cards(message, message.from_user.id)
+    await _render_wardrobe_overview(message, message.from_user.id)
 
 
 # ── Контекстные action-кнопки ────────────────────────────────────
@@ -867,11 +978,7 @@ async def action_wardrobe(callback: CallbackQuery, state: FSMContext) -> None:
     if not callback.message:
         return
     await state.set_state(BotStates.wardrobe_view)
-    await _render_wardrobe_cards(message=callback.message, user_id=callback.from_user.id)
-    await callback.message.answer(
-        "Нажмите 🏠 Меню, чтобы вернуться.",
-        reply_markup=wardrobe_view_keyboard(),
-    )
+    await _render_wardrobe_overview(message=callback.message, user_id=callback.from_user.id)
 
 
 # ── Task 12: быстрый первый образ ───────────────────────────────
@@ -913,6 +1020,90 @@ async def continue_upload_handler(callback: CallbackQuery, state: FSMContext) ->
         "Хорошо! Добавь следующую вещь.",
         reply_markup=photo_upload_keyboard(),
     )
+
+
+# ── Гардероб: навигация по категориям и пагинация ────────────────
+
+
+@router.callback_query(F.data.startswith("wardrobe:cat:"))
+async def wardrobe_category(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    category = callback.data.split(":", 2)[2]
+    await _render_wardrobe_page(callback.message, callback.from_user.id, category, page=0)
+
+
+@router.callback_query(F.data == "wardrobe:all")
+async def wardrobe_all(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    await _render_wardrobe_page(callback.message, callback.from_user.id, category=None, page=0)
+
+
+@router.callback_query(F.data.startswith("wardrobe:page:"))
+async def wardrobe_page(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    parts = callback.data.split(":")
+    # wardrobe:page:<cat_or_all>:<page>
+    cat_part = parts[2]
+    page = int(parts[3])
+    category = None if cat_part == "all" else cat_part
+    await _render_wardrobe_page(callback.message, callback.from_user.id, category, page)
+
+
+@router.callback_query(F.data == "wardrobe:back")
+async def wardrobe_back(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    await _render_wardrobe_overview(callback.message, callback.from_user.id)
+
+
+@router.callback_query(F.data.startswith("wardrobe:item:"))
+async def wardrobe_item_detail(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+    item_id = int(callback.data.split(":", 2)[2])
+    user_id = callback.from_user.id
+    items = await get_items(user_id)
+    item = next((i for i in items if int(i["id"]) == item_id), None)
+    if not item:
+        await callback.message.answer("Вещь не найдена.")
+        return
+
+    caption = _build_item_caption(item)
+    preview_file_id = item.get("processed_file_id") or item.get("telegram_file_id")
+    if preview_file_id:
+        await safe_answer_photo(callback.message,
+            photo=str(preview_file_id),
+            caption=caption,
+            reply_markup=_item_detail_keyboard(item_id),
+        )
+    else:
+        await callback.message.answer(
+            f"📸 Фото недоступно\n{caption}",
+            reply_markup=_item_detail_keyboard(item_id),
+        )
 
 
 # ── Task 13: фильтрация и сортировка гардероба ──────────────────
