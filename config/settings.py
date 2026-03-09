@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     s3_secret_key: str | None = None
     s3_bucket: str = "shkaf-rabotaet"
     s3_endpoint: str = "https://storage.yandexcloud.net"
+    max_bot_token: str | None = None
 
 
 settings = Settings()
