@@ -20,6 +20,7 @@ router = Router()
 @router.bot_started()
 async def on_bot_started(event: BotStarted, context: MemoryContext):
     """Пользователь нажал «Начать» (аналог /start)."""
+    logger.info("MAX bot_started from user %s, chat %s", event.user.user_id, event.chat_id)
     user_id = event.user.user_id
     from services.subscription_service import get_or_create_user
     await get_or_create_user(user_id)
@@ -41,6 +42,7 @@ async def on_bot_started(event: BotStarted, context: MemoryContext):
 
 @router.message_created(Command("start"))
 async def cmd_start(event: MessageCreated, context: MemoryContext):
+    logger.info("MAX /start from user %s", event.message.sender.user_id)
     user_id = event.message.sender.user_id
     from services.subscription_service import get_or_create_user
     await get_or_create_user(user_id)
@@ -78,3 +80,16 @@ async def cb_menu(event: MessageCallback, context: MemoryContext):
             text="Меню:",
             attachments=[menu_keyboard()],
         )
+
+
+@router.message_created()
+async def on_any_message(event: MessageCreated, context: MemoryContext):
+    """Catch-all: любое текстовое сообщение без команды → показать меню."""
+    text = event.message.body.text if event.message.body else None
+    user_id = event.message.sender.user_id
+    logger.info("MAX got message: %r from user %s", text, user_id)
+    await context.set_state(MaxStates.menu)
+    await event.message.answer(
+        "Выбери действие в меню 👇",
+        attachments=[menu_keyboard()],
+    )

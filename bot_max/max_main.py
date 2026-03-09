@@ -26,7 +26,8 @@ async def main():
     from bot_max.handlers.outfits import router as outfits_router
     from bot_max.handlers.payment import router as payment_router
 
-    dp.include_routers(menu_router, outfits_router, wardrobe_router, payment_router)
+    # menu_router последним — в нём catch-all хендлер для необработанных сообщений
+    dp.include_routers(outfits_router, wardrobe_router, payment_router, menu_router)
 
     await init_storage()
 
