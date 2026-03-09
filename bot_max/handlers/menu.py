@@ -20,7 +20,7 @@ router = Router()
 @router.bot_started()
 async def on_bot_started(event: BotStarted, context: MemoryContext):
     """Пользователь нажал «Начать» (аналог /start)."""
-    user_id = event.user_id
+    user_id = event.user.user_id
     from services.subscription_service import get_or_create_user
     await get_or_create_user(user_id)
 
