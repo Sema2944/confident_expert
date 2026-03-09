@@ -9,7 +9,7 @@ from maxapi.types import MessageCallback, LinkButton
 from bot.storage import _connect, _ph
 from bot_max.keyboards import _inline_kb, menu_keyboard
 from services.subscription_service import get_or_create_user
-from services.payment_service import create_subscription_payment
+from services.payment_service import create_payment
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def cb_subscribe(event: MessageCallback, context: MemoryContext):
         return
 
     # Создать платёж
-    result = await create_subscription_payment(user_id=user_id)
+    result = await create_payment(user_id=user_id)
     if result:
         kb = _inline_kb([
             [LinkButton(text="💳 Оплатить 399 ₽", url=result["confirmation_url"])],
