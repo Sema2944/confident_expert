@@ -3,13 +3,12 @@
 from maxapi.types import CallbackButton, LinkButton
 from maxapi.types.attachments.attachment import ButtonsPayload
 from maxapi.types.attachments.buttons.attachment_button import AttachmentButton
-from maxapi.enums.attachment import AttachmentType
 
 
 def _inline_kb(rows: list[list]) -> AttachmentButton:
     """Helper: построить inline-клавиатуру из рядов кнопок."""
     return AttachmentButton(
-        type=AttachmentType.INLINE_KEYBOARD,
+        type="inline_keyboard",
         payload=ButtonsPayload(buttons=rows),
     )
 
