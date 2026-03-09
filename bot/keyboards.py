@@ -371,11 +371,14 @@ def base_item_select_keyboard(items: list[dict], occasion: str) -> InlineKeyboar
 
 
 def outfit_choice_keyboard(count: int) -> InlineKeyboardMarkup:
-    """Buttons 1/2/3 + Другая база + Меню."""
+    """Buttons 1/2/3 + Купить + Другая база + Меню."""
     num_row = []
     for i in range(1, count + 1):
         num_row.append(InlineKeyboardButton(text=f"{i}\u20e3", callback_data=f"outfit:pick:{i}"))
     rows = [num_row]
+    rows.append([
+        InlineKeyboardButton(text="🛒 Купить образ", callback_data="outfit:buy"),
+    ])
     rows.append([
         InlineKeyboardButton(text="🔄 Другая база", callback_data="outfit:change_base"),
         InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu"),

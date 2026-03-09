@@ -318,6 +318,7 @@ def _extract_items_details(
             if item:
                 details[category] = {
                     "type": item.get("type"),
+                    "display_name": item.get("display_name"),
                     "primary_color": item.get("primary_color"),
                     "season": item.get("season"),
                     "formality": item.get("formality"),
@@ -1023,9 +1024,91 @@ async def outfit_pick(callback: CallbackQuery, state: FSMContext) -> None:
     except Exception:
         logging.exception("Failed to save outfit to history")
 
+    await state.update_data(picked_outfit_index=pick_idx)
+
     await callback.message.answer(
         f"Отлично, образ {pick_idx + 1} сохранён! Что думаешь?",
         reply_markup=outfit_reaction_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "outfit:buy")
+async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Show shop links for items in the chosen outfit."""
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message:
+        return
+
+    data = await state.get_data()
+    pick_idx = data.get("picked_outfit_index")
+    multi_outfits = data.get("multi_outfits", [])
+
+    if pick_idx is None or pick_idx < 0 or pick_idx >= len(multi_outfits):
+        await callback.message.answer(
+            "Сначала выбери образ — нажми 1️⃣, 2️⃣ или 3️⃣"
+        )
+        return
+
+    chosen = multi_outfits[pick_idx]
+    items_details = chosen.get("items_details", {})
+
+    if not items_details:
+        await callback.message.answer("Не удалось определить вещи в образе.")
+        return
+
+    from bot.utils.translate import EN_TO_RU, COLOR_EN_TO_RU, is_ascii_name
+    from services.visual_search_service import build_affiliate_link, STORES
+
+    _CAT_EMOJI = {"top": "👕", "bottom": "👖", "outerwear": "🧥", "shoes": "👟", "onepiece": "👔", "accessories": "🧢"}
+
+    rows: list[list[InlineKeyboardButton]] = []
+    text_lines = ["🛒 Похожие вещи в магазинах:\n"]
+
+    for cat, detail in items_details.items():
+        display = detail.get("display_name") or ""
+        item_type = detail.get("type") or ""
+        color = detail.get("primary_color") or ""
+
+        # Build Russian label
+        if display and not is_ascii_name(display):
+            label = display
+        else:
+            ru_type = EN_TO_RU.get(item_type.lower(), item_type) if item_type else ""
+            ru_color = COLOR_EN_TO_RU.get(color.lower(), color) if color else ""
+            if ru_color and ru_type:
+                label = f"{ru_color} {ru_type}"
+            else:
+                label = ru_type or ru_color or display or cat
+            label = label.strip()
+
+        # Build search query
+        query = label
+        gender = "женский"
+        search_q = f"{query} {gender}".strip()
+
+        emoji = _CAT_EMOJI.get(cat, "📦")
+        text_lines.append(f"{emoji} {label}")
+
+        # One row of store buttons per item
+        store_row = []
+        for store_key, store_info in STORES.items():
+            url = build_affiliate_link(store_key, search_q)
+            if url:
+                store_row.append(InlineKeyboardButton(
+                    text=f"{store_info['emoji']} {store_info['name']}",
+                    url=url,
+                ))
+        if store_row:
+            rows.append(store_row)
+
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")])
+
+    await callback.message.answer(
+        "\n".join(text_lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
