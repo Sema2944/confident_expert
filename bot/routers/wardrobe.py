@@ -301,7 +301,7 @@ async def _render_wardrobe_overview(message: Message, user_id: int) -> None:
     """Показать статистику гардероба + кнопки категорий (без фото)."""
     items = await get_items(user_id)
     if not items:
-        await message.answer("Гардероб пока пуст. Нажмите '📥 Добавить вещь' и добавьте вещи.")
+        await message.answer("Гардероб пока пуст. Нажмите '📸 Добавить вещь' и добавьте вещи.")
         return
 
     stats = await get_wardrobe_stats(user_id)
@@ -387,7 +387,7 @@ async def upload_start(message: Message, state: FSMContext) -> None:
     await message.answer("Выберите категорию:", reply_markup=category_keyboard())
 
 
-@router.message(F.text.in_({"📥 Загрузить", "Загрузить", "📥 Добавить вещь"}))
+@router.message(F.text.in_({"📥 Загрузить", "Загрузить", "📥 Добавить вещь", "📸 Добавить вещь"}))
 async def upload_start_short(message: Message, state: FSMContext) -> None:
     await upload_start(message, state)
 

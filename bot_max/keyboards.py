@@ -18,7 +18,7 @@ def menu_keyboard() -> AttachmentButton:
         [CallbackButton(text="✨ Собрать образ", payload="action:outfit")],
         [
             CallbackButton(text="👗 Мой гардероб", payload="action:wardrobe"),
-            CallbackButton(text="📥 Добавить вещь", payload="action:upload"),
+            CallbackButton(text="📸 Добавить вещь", payload="action:upload"),
         ],
         [
             CallbackButton(text="💎 Подписка", payload="action:subscribe"),

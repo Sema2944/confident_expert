@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.keyboards import location_request_keyboard, menu_keyboard
+from bot.keyboards import location_request_keyboard, menu_keyboard, more_menu_keyboard
 from bot.states import BotStates
 from bot.storage import get_items, get_user_location, set_user_location
 from bot.utils.messages import HELP_MESSAGE, START_MESSAGE
@@ -111,6 +111,11 @@ async def handle_city_text(message: Message, state: FSMContext) -> None:
         f"📍 Город: {city}\nТеперь подбираю образы по реальной погоде!",
         reply_markup=menu_keyboard(),
     )
+
+
+@router.message(F.text == "⚙️ Ещё")
+async def show_more_menu(message: Message, state: FSMContext) -> None:
+    await message.answer("Дополнительные функции:", reply_markup=more_menu_keyboard())
 
 
 @router.message(Command("menu"))
