@@ -803,7 +803,7 @@ async def _generate_and_show_multi_outfits(
     base_cat_emoji = {"onepiece": "👔", "bottom": "👖", "top": "👕", "outerwear": "🧥"}.get(
         normalize_category(base_item.get("category")), "📦"
     )
-    from bot.utils.translate import is_ascii_name, translate_display_name
+    from bot.utils.translate import is_ascii_name, translate_display_name, COLOR_EN_TO_RU
     base_name = base_item.get("display_name") or base_item.get("type") or "вещь"
     if is_ascii_name(base_name):
         base_name = translate_display_name(
@@ -812,6 +812,8 @@ async def _generate_and_show_multi_outfits(
             item_type=base_item.get("type"),
         ) or base_name
     base_color = base_item.get("primary_color") or ""
+    if base_color and is_ascii_name(base_color):
+        base_color = COLOR_EN_TO_RU.get(base_color.lower(), base_color)
     await message.answer(f"{base_cat_emoji} Базовая вещь: {base_color} {base_name}".strip())
 
     # Store outfits in state for later pick

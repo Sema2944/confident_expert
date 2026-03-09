@@ -292,9 +292,13 @@ def capsule_select_keyboard(capsules: list[dict], occasion: str) -> InlineKeyboa
 
 def capsule_add_item_keyboard(capsule_id: int, items: list[dict]) -> InlineKeyboardMarkup:
     """Pick items to add to a capsule (show first 10)."""
+    from bot.utils.translate import EN_TO_RU, is_ascii_name
+
     rows: list[list[InlineKeyboardButton]] = []
     for item in items[:10]:
         name = item.get("display_name") or item.get("type") or "вещь"
+        if is_ascii_name(name):
+            name = EN_TO_RU.get(name.lower(), name)
         rows.append([InlineKeyboardButton(
             text=f"{name}",
             callback_data=f"capsule:additem:{capsule_id}:{item['id']}",
@@ -338,12 +342,18 @@ _BASE_CAT_EMOJI = {
 
 def base_item_select_keyboard(items: list[dict], occasion: str) -> InlineKeyboardMarkup:
     """Select base item for multi-outfit generation."""
+    from bot.utils.translate import EN_TO_RU, COLOR_EN_TO_RU, is_ascii_name
+
     rows: list[list[InlineKeyboardButton]] = []
     for item in items[:8]:
         cat = item.get("category", "")
         emoji = _BASE_CAT_EMOJI.get(cat, "📦")
         name = item.get("display_name") or item.get("type") or "вещь"
+        if is_ascii_name(name):
+            name = EN_TO_RU.get(name.lower(), name)
         color = item.get("primary_color") or ""
+        if color and is_ascii_name(color):
+            color = COLOR_EN_TO_RU.get(color.lower(), color)
         label = f"{emoji} {color} {name}".strip()[:40]
         rows.append([InlineKeyboardButton(
             text=label,
