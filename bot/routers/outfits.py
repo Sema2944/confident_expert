@@ -20,7 +20,9 @@ from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
 from services.outfit_service import OutfitImageService
 from services.outfit_visualization_service import describe_items_for_mannequin, generate_mannequin_image
+from services.visual_search_service import STORES, build_affiliate_link
 from bot.utils.retry import safe_answer_photo
+from bot.utils.translate import COLOR_EN_TO_RU, EN_TO_RU, is_ascii_name
 
 router = Router()
 outfit_service = OutfitService()
@@ -1034,7 +1036,7 @@ async def outfit_pick(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "outfit:buy")
 async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
-    """Show shop links for items in the chosen outfit."""
+    """Отдельные сообщения с кнопками магазинов для каждой вещи в выбранном образе."""
     try:
         await callback.answer()
     except Exception:
@@ -1059,19 +1061,13 @@ async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer("Не удалось определить вещи в образе.")
         return
 
-    from bot.utils.translate import EN_TO_RU, COLOR_EN_TO_RU, is_ascii_name
-    from services.visual_search_service import build_affiliate_link, STORES
-
     _CAT_EMOJI = {"top": "👕", "bottom": "👖", "outerwear": "🧥", "shoes": "👟", "onepiece": "👔", "accessories": "🧢"}
-
-    await callback.message.answer("🛒 Похожие вещи в магазинах:")
 
     for cat, detail in items_details.items():
         display = detail.get("display_name") or ""
         item_type = detail.get("type") or ""
         color = detail.get("primary_color") or ""
 
-        # Build Russian label
         if display and not is_ascii_name(display):
             label = display
         else:
@@ -1083,22 +1079,37 @@ async def buy_outfit(callback: CallbackQuery, state: FSMContext) -> None:
                 label = ru_type or ru_color or display or cat
             label = label.strip()
 
+        if not label:
+            label = cat
+
         search_q = f"{label} женский".strip()
         emoji = _CAT_EMOJI.get(cat, "📦")
 
-        store_row = []
-        for store_key, store_info in STORES.items():
+        buttons = []
+        for store_key in ["lamoda", "wildberries", "ozon"]:
             url = build_affiliate_link(store_key, search_q)
             if url:
-                store_row.append(InlineKeyboardButton(
-                    text=f"{store_info['emoji']} {store_info['name']}",
-                    url=url,
-                ))
-        if store_row:
-            await callback.message.answer(
-                f"🔍 {emoji} {label}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[store_row]),
-            )
+                info = STORES.get(store_key, {})
+                buttons.append(
+                    InlineKeyboardButton(
+                        text=f"{info.get('emoji', '🛒')} {info.get('name', store_key.capitalize())}",
+                        url=url,
+                    )
+                )
+        if not buttons:
+            continue
+
+        await callback.message.answer(
+            f"🔍 {emoji} {label}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[buttons]),
+        )
+
+    await callback.message.answer(
+        "🏠 Вернуться в меню",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🏠 Меню", callback_data="action:menu")]]
+        ),
+    )
 
 
 @router.callback_query(F.data == "outfit:change_base")

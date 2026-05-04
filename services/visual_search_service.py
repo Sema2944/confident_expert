@@ -79,20 +79,31 @@ async def describe_item_for_search(bot, file_id: str) -> dict | None:
         return None
 
 
-def build_affiliate_link(store_key: str, query: str) -> str:
-    """Строит ссылку с Admitad deeplink (если настроен) или прямую."""
-    store = STORES.get(store_key)
-    if not store:
-        return ""
+def build_affiliate_link(store_key: str, query: str) -> str | None:
+    """Партнёрская ссылка (Admitad UID / в будущем API) или обычный поиск по магазину."""
+    if store_key not in STORES:
+        return None
 
-    direct_url = store["search_url"] + quote_plus(query)
+    store = STORES[store_key]
+    q = quote_plus(query)
+    direct_url = store["search_url"] + q
 
     if settings.admitad_uid:
-        # Admitad deeplink format
         encoded = quote_plus(direct_url)
         return f"https://ad.admitad.com/g/{settings.admitad_uid}/?ulp={encoded}"
 
-    return direct_url
+    # Когда появится генерация ссылок через Admitad API — использовать admitad_api_token здесь.
+    # if settings.admitad_api_token:
+    #     ...
+
+    # FALLBACK: обычный поиск (без партнёрки), работает без ключей
+    if store_key == "lamoda":
+        return f"https://www.lamoda.ru/search?q={q}"
+    if store_key == "wildberries":
+        return f"https://www.wildberries.ru/catalog/0/search.aspx?search={q}"
+    if store_key == "ozon":
+        return f"https://www.ozon.ru/search/?text={q}"
+    return None
 
 
 def build_search_results(search_data: dict) -> list[dict[str, str]]:

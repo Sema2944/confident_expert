@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     subscription_price: int = 399
     subscription_days: int = 30
     admitad_uid: str = ""
+    admitad_api_token: str | None = None
     replicate_api_token: str | None = None
     db_url: str | None = None
     admin_id: int = 0
