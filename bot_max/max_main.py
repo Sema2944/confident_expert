@@ -30,12 +30,37 @@ async def main():
 
     bot = Bot(token)
 
+    # Диагностика в логах Render: токен и webhook до снятия
+    try:
+        me = await bot.get_me()
+        logger.info(
+            "MAX: get_me OK — bot user_id=%s username=%s",
+            getattr(me, "user_id", None),
+            getattr(me, "username", None),
+        )
+    except Exception:
+        logger.exception("MAX: get_me failed — проверьте MAX_BOT_TOKEN (401 / InvalidToken)")
+
+    try:
+        subs = await bot.get_subscriptions()
+        if subs.subscriptions:
+            logger.warning(
+                "MAX: активны webhook-подписки (%s) — polling их не видит, снимаем",
+                len(subs.subscriptions),
+            )
+            for s in subs.subscriptions:
+                logger.warning("MAX: webhook → %s", s.url)
+        else:
+            logger.info("MAX: webhook-подписок нет")
+    except Exception:
+        logger.exception("MAX: get_subscriptions failed")
+
     # Если в кабинете MAX включён webhook, long polling не получает апдейты.
     try:
         await bot.delete_webhook()
-        logger.info("MAX: подписки webhook сняты, дальше только long polling")
+        logger.info("MAX: delete_webhook выполнен — дальше только long polling")
     except Exception:
-        logger.exception("MAX: не удалось снять webhook (продолжаем polling — проверьте логи API)")
+        logger.exception("MAX: delete_webhook failed (продолжаем polling)")
 
     dp = Dispatcher()
 
