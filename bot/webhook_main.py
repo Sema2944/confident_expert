@@ -64,7 +64,10 @@ async def main() -> None:
 
     init_yookassa()
 
-    bot = Bot(token=settings.bot_token)
+    tg_token = (settings.bot_token or "").strip()
+    if not tg_token:
+        raise RuntimeError("BOT_TOKEN is required for Telegram webhook mode")
+    bot = Bot(token=tg_token)
     dp: Dispatcher = build_dispatcher()
 
     # aiohttp app

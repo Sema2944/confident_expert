@@ -2,29 +2,48 @@
 
 import asyncio
 import logging
+import os
 
 from maxapi import Bot, Dispatcher
 
+from config.logging import setup_logging
 from config.settings import settings
 from bot.storage import init_storage
 
 
-async def main():
-    if not settings.max_bot_token:
-        logging.error("MAX_BOT_TOKEN not set — MAX bot disabled")
-        return
+def _max_token() -> str:
+    """Токен из pydantic-settings или напрямую из окружения (Render)."""
+    return (settings.max_bot_token or os.environ.get("MAX_BOT_TOKEN") or "").strip()
 
-    logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
+
+async def main():
+    setup_logging(settings.log_level)
     logger = logging.getLogger(__name__)
 
-    bot = Bot(settings.max_bot_token)
+    token = _max_token()
+    if not token:
+        logger.error(
+            "MAX_BOT_TOKEN не задан — MAX-бот не запускается. "
+            "Добавьте MAX_BOT_TOKEN в Render / .env."
+        )
+        return
+
+    bot = Bot(token)
+
+    # Если в кабинете MAX включён webhook, long polling не получает апдейты.
+    try:
+        await bot.delete_webhook()
+        logger.info("MAX: подписки webhook сняты, дальше только long polling")
+    except Exception:
+        logger.exception("MAX: не удалось снять webhook (продолжаем polling — проверьте логи API)")
+
     dp = Dispatcher()
 
     # Регистрация роутеров
     from bot_max.handlers.menu import router as menu_router
-    from bot_max.handlers.wardrobe import router as wardrobe_router
     from bot_max.handlers.outfits import router as outfits_router
     from bot_max.handlers.payment import router as payment_router
+    from bot_max.handlers.wardrobe import router as wardrobe_router
 
     # menu_router последним — в нём catch-all хендлер для необработанных сообщений
     dp.include_routers(outfits_router, wardrobe_router, payment_router, menu_router)

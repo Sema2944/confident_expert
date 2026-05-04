@@ -42,6 +42,9 @@ async def on_bot_started(event: BotStarted, context: MemoryContext):
 
 @router.message_created(Command("start"))
 async def cmd_start(event: MessageCreated, context: MemoryContext):
+    if not event.message.sender:
+        logger.warning("MAX /start: message without sender")
+        return
     logger.info("MAX /start from user %s", event.message.sender.user_id)
     user_id = event.message.sender.user_id
     from services.subscription_service import get_or_create_user
@@ -85,7 +88,11 @@ async def cb_menu(event: MessageCallback, context: MemoryContext):
 @router.message_created()
 async def on_any_message(event: MessageCreated, context: MemoryContext):
     """Catch-all: любое текстовое сообщение без команды → показать меню."""
-    text = event.message.body.text if event.message.body else None
+    if not event.message.sender:
+        logger.warning("MAX message_created: no sender, skip")
+        return
+    body = event.message.body
+    text = body.text if body else None
     user_id = event.message.sender.user_id
     logger.info("MAX got message: %r from user %s", text, user_id)
     await context.set_state(MaxStates.menu)

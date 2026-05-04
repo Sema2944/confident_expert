@@ -71,8 +71,14 @@ def _log_router_overview(dispatcher: Dispatcher) -> None:
 
 async def main() -> None:
     setup_logging(settings.log_level)
+    tg_token = (settings.bot_token or "").strip()
+    if not tg_token:
+        raise RuntimeError(
+            "BOT_TOKEN не задан — для Telegram-бота нужен токен (python -m bot.main). "
+            "Для только MAX используйте python -m bot_max.max_main."
+        )
     await init_storage()
-    bot = Bot(token=settings.bot_token)
+    bot = Bot(token=tg_token)
     dispatcher = build_dispatcher()
     _log_router_overview(dispatcher)
 

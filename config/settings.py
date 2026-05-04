@@ -1,10 +1,11 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
-    bot_token: str
+    bot_token: str | None = None
     ai_api_key: str | None = None
     ai_api_base: str = "https://api.openai.com/v1"
     ai_model: str = "gpt-4.1-mini"
@@ -32,6 +33,16 @@ class Settings(BaseSettings):
     s3_bucket: str = "shkaf-rabotaet"
     s3_endpoint: str = "https://storage.yandexcloud.net"
     max_bot_token: str | None = None
+
+    @model_validator(mode="after")
+    def require_at_least_one_bot_credential(self) -> "Settings":
+        has_tg = bool((self.bot_token or "").strip())
+        has_max = bool((self.max_bot_token or "").strip())
+        if not has_tg and not has_max:
+            raise ValueError(
+                "Укажите BOT_TOKEN (Telegram) и/или MAX_BOT_TOKEN (мессенджер MAX) в окружении."
+            )
+        return self
 
 
 settings = Settings()
