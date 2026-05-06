@@ -18,7 +18,8 @@ from services.subscription_service import activate_subscription
 async def on_startup(bot: Bot) -> None:
     webhook_base = os.getenv("WEBHOOK_BASE")
     webhook_path = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-    webhook_secret = os.getenv("WEBHOOK_SECRET")
+    _sec = (os.getenv("WEBHOOK_SECRET") or "").strip()
+    webhook_secret = _sec if _sec else None
 
     if not webhook_base:
         raise RuntimeError("WEBHOOK_BASE is not set")
@@ -119,7 +120,8 @@ async def main() -> None:
     app.router.add_post("/yookassa/webhook", yookassa_webhook)
 
     webhook_path = os.getenv("WEBHOOK_PATH", "/tg/webhook")
-    webhook_secret = os.getenv("WEBHOOK_SECRET")
+    _sec = (os.getenv("WEBHOOK_SECRET") or "").strip()
+    webhook_secret = _sec if _sec else None
 
     # Регистрируем webhook handler
     SimpleRequestHandler(

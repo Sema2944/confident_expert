@@ -1,7 +1,7 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -12,7 +12,7 @@ from bot.storage import add_feedback
 router = Router()
 
 
-@router.message(Command("feedback"))
+@router.message(Command("feedback", ignore_mention=True), StateFilter("*"))
 @router.message(F.text.in_({"📝 Обратная связь", "💬 Обратная связь"}))
 async def start_feedback(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.feedback_waiting_text)

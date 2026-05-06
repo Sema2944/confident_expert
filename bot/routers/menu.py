@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -12,8 +12,9 @@ from services.wardrobe_analysis_service import analyze_wardrobe_gaps
 router = Router()
 
 
-@router.message(Command("start"))
+@router.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
     from services.subscription_service import get_or_create_user, activate_subscription
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
 
@@ -61,7 +62,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await message.answer(START_MESSAGE, reply_markup=menu_keyboard())
 
 
-@router.message(Command("city"))
+@router.message(Command("city", ignore_mention=True), StateFilter("*"))
 async def cmd_set_city(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.setting_city)
     await message.answer(
@@ -118,12 +119,12 @@ async def show_more_menu(message: Message, state: FSMContext) -> None:
     await message.answer("Дополнительные функции:", reply_markup=more_menu_keyboard())
 
 
-@router.message(Command("menu"))
+@router.message(Command("menu", ignore_mention=True), StateFilter("*"))
 async def cmd_menu(message: Message) -> None:
     await message.answer("Меню", reply_markup=menu_keyboard())
 
 
-@router.message(Command("help"))
+@router.message(Command("help", ignore_mention=True), StateFilter("*"))
 async def cmd_help(message: Message) -> None:
     await message.answer(HELP_MESSAGE)
 

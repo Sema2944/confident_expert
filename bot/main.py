@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import ErrorEvent
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -19,11 +20,12 @@ def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
     dispatcher.message.middleware(RateLimitMiddleware())
     dispatcher.include_router(menu.router)
-    dispatcher.include_router(wardrobe.router)
+    # Сначала глобальные кнопки меню / образов / оплаты — иначе wardrobe_view перехватывает любой текст
     dispatcher.include_router(outfits.router)
     dispatcher.include_router(trends.router)
     dispatcher.include_router(payment.router)
     dispatcher.include_router(subscription.router)
+    dispatcher.include_router(wardrobe.router)
     dispatcher.include_router(search.router)
     dispatcher.include_router(voice.router)
     # survey must be before feedback (feedback has catch-all callback handler)
@@ -33,7 +35,7 @@ def build_dispatcher() -> Dispatcher:
     # Universal 🏠 Меню handler — registered last as fallback for any state
     fallback_router = Router(name="fallback_menu")
 
-    @fallback_router.message(F.text == "🏠 Меню")
+    @fallback_router.message(F.text == "🏠 Меню", StateFilter("*"))
     async def go_to_menu(message: Message, state: FSMContext) -> None:
         from bot.keyboards import menu_keyboard
         from bot.states import BotStates

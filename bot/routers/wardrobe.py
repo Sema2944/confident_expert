@@ -2,7 +2,7 @@ import logging
 from io import BytesIO
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
@@ -48,6 +48,14 @@ from services.visual_search_service import build_affiliate_link
 from bot.utils.retry import safe_answer_photo
 
 router = Router()
+
+
+class WardrobeRenamePending(Filter):
+    """Срабатывает только после callback «✏️ Переименовать», когда ждём текст нового названия."""
+
+    async def __call__(self, message: Message, state: FSMContext) -> bool:
+        data = await state.get_data()
+        return bool(data.get("rename_item_id"))
 
 
 async def _safe_answer(callback: CallbackQuery, text: str = "", show_alert: bool = False) -> None:
@@ -968,15 +976,12 @@ async def wardrobe_back_to_menu(message: Message, state: FSMContext) -> None:
     await message.answer("Главное меню:", reply_markup=menu_keyboard())
 
 
-@router.message(BotStates.wardrobe_view, F.text)
+@router.message(BotStates.wardrobe_view, WardrobeRenamePending(), F.text)
 async def rename_wardrobe_item(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     item_id = data.get("rename_item_id")
     if not item_id:
-        await message.answer(
-            "Используйте кнопки под карточкой вещи: удалить, переименовать или улучшить фото.",
-            reply_markup=wardrobe_view_keyboard(),
-        )
+        logging.warning("WardrobeRenamePending matched but rename_item_id missing")
         return
 
     if not message.text:
@@ -1239,7 +1244,7 @@ async def wardrobe_sort(callback: CallbackQuery) -> None:
 # ── /check — проверка совместимости двух вещей ──────────────────
 
 
-@router.message(Command("check"))
+@router.message(Command("check", ignore_mention=True))
 async def cmd_check(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.check_compatibility)
     await state.update_data(check_photo_1=None)
