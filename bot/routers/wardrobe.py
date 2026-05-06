@@ -56,7 +56,7 @@ async def _safe_answer(callback: CallbackQuery, text: str = "", show_alert: bool
         if text:
             await callback.answer(text, show_alert=show_alert)
         else:
-            await _safe_answer(callback)
+            await callback.answer()
     except Exception:
         pass
 
