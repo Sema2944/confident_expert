@@ -12,7 +12,15 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # ─── Backend detection ──────────────────────────────────────────
-_USE_PG = bool(settings.db_url)
+_DB_URL = (settings.db_url or "").strip()
+_PG_SCHEMES = ("postgresql://", "postgres://")
+_USE_PG = _DB_URL.startswith(_PG_SCHEMES)
+
+if _DB_URL and not _USE_PG:
+    logger.warning(
+        "DB_URL has unsupported scheme for asyncpg, fallback to SQLite. "
+        "Expected prefix: postgresql:// or postgres://"
+    )
 
 _STORAGE_PATH = Path(
     os.getenv("WARDROBE_STORAGE_PATH", Path(__file__).resolve().parents[1] / "data" / "wardrobe.sqlite3")
