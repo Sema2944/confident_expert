@@ -30,37 +30,43 @@ async def main():
 
     bot = Bot(token)
 
-    # Диагностика в логах Render: токен и webhook до снятия
+    me_user_id: int | None = None
+    me_username: str | None = None
     try:
         me = await bot.get_me()
-        logger.info(
-            "MAX: get_me OK — bot user_id=%s username=%s",
-            getattr(me, "user_id", None),
-            getattr(me, "username", None),
-        )
+        me_user_id = getattr(me, "user_id", None)
+        me_username = getattr(me, "username", None)
+        if me_user_id is None:
+            logger.error(
+                "MAX: get_me вернул Error/без user_id (вероятно, MAX_BOT_TOKEN недействителен "
+                "или сервер MAX ответил 403 deprecated.token из-за старой версии maxapi). "
+                "Проверьте токен в @MasterBot и обновите MAX_BOT_TOKEN в Render."
+            )
+            return
+        logger.info("MAX: get_me OK — user_id=%s username=%s", me_user_id, me_username)
     except Exception:
         logger.exception("MAX: get_me failed — проверьте MAX_BOT_TOKEN (401 / InvalidToken)")
+        return
 
-    try:
-        subs = await bot.get_subscriptions()
-        if subs.subscriptions:
-            logger.warning(
-                "MAX: активны webhook-подписки (%s) — polling их не видит, снимаем",
-                len(subs.subscriptions),
-            )
-            for s in subs.subscriptions:
-                logger.warning("MAX: webhook → %s", s.url)
-        else:
-            logger.info("MAX: webhook-подписок нет")
-    except Exception:
-        logger.exception("MAX: get_subscriptions failed")
+    if hasattr(bot, "get_subscriptions"):
+        try:
+            subs = await bot.get_subscriptions()
+            urls = [s.url for s in (getattr(subs, "subscriptions", None) or [])]
+            if urls:
+                logger.warning("MAX: активны webhook-подписки (%s) — снимаем для polling", len(urls))
+                for u in urls:
+                    logger.warning("MAX: webhook → %s", u)
+            else:
+                logger.info("MAX: webhook-подписок нет")
+        except Exception:
+            logger.exception("MAX: get_subscriptions failed (не критично)")
 
-    # Если в кабинете MAX включён webhook, long polling не получает апдейты.
-    try:
-        await bot.delete_webhook()
-        logger.info("MAX: delete_webhook выполнен — дальше только long polling")
-    except Exception:
-        logger.exception("MAX: delete_webhook failed (продолжаем polling)")
+    if hasattr(bot, "delete_webhook"):
+        try:
+            await bot.delete_webhook()
+            logger.info("MAX: delete_webhook выполнен — дальше только long polling")
+        except Exception:
+            logger.exception("MAX: delete_webhook failed (продолжаем polling)")
 
     dp = Dispatcher()
 
