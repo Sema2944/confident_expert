@@ -5,6 +5,28 @@ import logging
 import os
 
 from maxapi import Bot, Dispatcher
+from maxapi.types.updates.message_callback import MessageCallback as _MaxMessageCallback
+
+
+_orig_callback_answer = _MaxMessageCallback.answer
+
+
+async def _safe_callback_answer(self, *args, **kwargs):
+    """MAX API может вернуть 400 (proto.payload / buttons cannot be null) на пустой ответ.
+
+    Делаем вызов безопасным, чтобы хэндлеры не падали из-за «беззвучного» подтверждения
+    callback-кнопки (для UX это не критично).
+    """
+    try:
+        return await _orig_callback_answer(self, *args, **kwargs)
+    except Exception as exc:  # pragma: no cover — внешний API
+        logging.getLogger("bot_max.max_main").warning(
+            "MAX message_callback answer ignored due to API error: %s", exc
+        )
+        return None
+
+
+_MaxMessageCallback.answer = _safe_callback_answer  # type: ignore[assignment]
 
 from config.logging import setup_logging
 from config.settings import settings
