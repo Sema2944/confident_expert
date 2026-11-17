@@ -46,6 +46,17 @@ WARDROBE_STORAGE_PATH=./data/wardrobe.sqlite3
 ## Run (long polling)
 python -m bot.main
 
+## Channel autopost
+
+Posts to the Telegram channel run only when `CHANNEL_AUTOPOST_ENABLED=true`.
+The default is `false`: startup does not seed `scheduled_posts` and does not start
+`scheduler_loop`. That loop also sends morning outfits, paywall follow-ups, and the
+21:00 admin report, so those stay off while the flag is false.
+Leave the flag off unless storage survives restarts (PostgreSQL via `DB_URL`).
+The SQLite file (`WARDROBE_STORAGE_PATH`) is local and is lost on Render, which has
+no persistent disk. Posts that are already sent are never reset to pending. Unsent
+posts older than 30 minutes are stored as expired and are not published on startup.
+
 ## Notes
 - Replace the prompt files in `prompts/` with the approved production versions.
 - Use a proper task queue (RQ/Celery) for image generation in production.

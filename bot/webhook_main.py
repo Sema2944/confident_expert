@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.main import build_dispatcher
-from bot.scheduler import init_scheduled_posts_table, scheduler_loop, seed_week1_posts, seed_week2_posts
+from bot.scheduler import start_channel_autopost
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
@@ -59,9 +59,6 @@ async def on_shutdown(bot: Bot) -> None:
 async def main() -> None:
     setup_logging(settings.log_level)
     await init_storage()
-    await init_scheduled_posts_table()
-    await seed_week1_posts()
-    await seed_week2_posts()
 
     init_yookassa()
 
@@ -146,15 +143,16 @@ async def main() -> None:
 
     logging.info(f"Webhook server started on 0.0.0.0:{port}")
 
-    # запускаем планировщик автопостинга
-    scheduler_task = asyncio.create_task(scheduler_loop(bot))
+    # Автопостинг в канал только при CHANNEL_AUTOPOST_ENABLED=true.
+    scheduler_task = await start_channel_autopost(bot)
 
     # держим процесс живым
     try:
         while True:
             await asyncio.sleep(3600)
     finally:
-        scheduler_task.cancel()
+        if scheduler_task is not None:
+            scheduler_task.cancel()
         await on_shutdown(bot)
         await runner.cleanup()
 
