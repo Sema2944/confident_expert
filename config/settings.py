@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     admitad_api_token: str | None = None
     replicate_api_token: str | None = None
     db_url: str | None = None
+    # false: не сеять посты канала и не запускать scheduler_loop (безопасно при эфемерном SQLite).
+    channel_autopost_enabled: bool = False
     admin_id: int = 0
     s3_access_key: str | None = None
     s3_secret_key: str | None = None

@@ -8,9 +8,24 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot
 
 from bot.storage import _connect, _USE_PG, _ph
+from config.settings import settings
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 CHANNEL_ID = "@shkaf_rabotaet"
+# Просроченный pending не публикуем пачкой на старте: только если время ещё в этом окне.
+STALE_GRACE = timedelta(minutes=30)
+_STALE_REASON = "skipped: scheduled time is outside the 30 minute grace window"
+
+
+def _parse_scheduled_at(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_stale(scheduled_at: str, now: datetime) -> bool:
+    return _parse_scheduled_at(scheduled_at) < now - STALE_GRACE
 
 
 # ─── Database ──────────────────────────────────────────────
@@ -94,6 +109,20 @@ async def mark_post_failed(post_id: int, error: str) -> None:
         await db.execute(
             f"UPDATE scheduled_posts SET status = 'failed', error_message = {_ph(1)} WHERE id = {_ph(2)}",
             (error, post_id),
+        )
+        await db.commit()
+
+
+async def mark_post_expired(post_id: int) -> None:
+    """Закрывает только pending. Уже отправленные строки не трогаем."""
+    async with _connect() as db:
+        await db.execute(
+            f"""
+            UPDATE scheduled_posts
+            SET status = 'expired', error_message = {_ph(1)}
+            WHERE id = {_ph(2)} AND status = 'pending'
+            """,
+            (_STALE_REASON, post_id),
         )
         await db.commit()
 
@@ -225,21 +254,41 @@ async def _send_daily_stats_report(bot: Bot) -> None:
 _last_hourly_check: int = -1
 
 
+async def process_due_posts(bot: Bot) -> int:
+    """Публикует pending внутри grace window. Более старые неотправленные помечает expired."""
+    now = datetime.now(timezone.utc)
+    due_posts = await get_due_posts()
+    sent = 0
+    for post in due_posts:
+        if _is_stale(post["scheduled_at"], now):
+            await mark_post_expired(post["id"])
+            logging.info(
+                "Skipped stale scheduled post %s (scheduled_at=%s, channel=%s); "
+                "outside %s-minute grace, marked expired",
+                post["id"],
+                post["scheduled_at"],
+                post["channel_id"],
+                int(STALE_GRACE.total_seconds() // 60),
+            )
+            continue
+        try:
+            await send_scheduled_post(bot, post)
+            await mark_post_sent(post["id"])
+            logging.info("Scheduled post %s sent to %s", post["id"], post["channel_id"])
+            sent += 1
+        except Exception as exc:
+            await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
+            logging.exception("Failed to send scheduled post %s", post["id"])
+    return sent
+
+
 async def scheduler_loop(bot: Bot) -> None:
     logging.info("Scheduler loop started")
     global _last_hourly_check
     try:
         while True:
             try:
-                due_posts = await get_due_posts()
-                for post in due_posts:
-                    try:
-                        await send_scheduled_post(bot, post)
-                        await mark_post_sent(post["id"])
-                        logging.info("Scheduled post %s sent to %s", post["id"], post["channel_id"])
-                    except Exception as exc:
-                        await mark_post_failed(post["id"], f"{type(exc).__name__}: {exc}")
-                        logging.exception("Failed to send scheduled post %s", post["id"])
+                await process_due_posts(bot)
 
                 # Раз в час — morning push + follow-up + дневная статистика
                 current_hour = datetime.now(MOSCOW_TZ).hour
@@ -257,6 +306,20 @@ async def scheduler_loop(bot: Bot) -> None:
     except asyncio.CancelledError:
         logging.info("Scheduler loop stopped")
         raise
+
+
+async def start_channel_autopost(bot: Bot) -> asyncio.Task | None:
+    """Сеет расписание и запускает цикл. При выключенном флаге не делает ни того, ни другого."""
+    if not settings.channel_autopost_enabled:
+        logging.info(
+            "CHANNEL_AUTOPOST_ENABLED is false; not seeding channel posts and not starting scheduler"
+        )
+        return None
+    await init_scheduled_posts_table()
+    await seed_week1_posts()
+    await seed_week2_posts()
+    logging.info("Channel autopost enabled; starting scheduler loop")
+    return asyncio.create_task(scheduler_loop(bot))
 
 
 # ─── Seed Data ─────────────────────────────────────────────
@@ -447,22 +510,72 @@ WEEK2_POSTS = [
 ]
 
 
-async def seed_week2_posts() -> int:
+async def _seed_posts(posts: list[dict], label: str) -> int:
+    """Вставляет недостающие посты. status sent/failed/expired не перезаписывает.
+
+    Время старше grace window сохраняется как expired, чтобы рестарт не публиковал хвост.
+    """
+    now = datetime.now(timezone.utc)
+    inserted = 0
+    updated = 0
+    expired = 0
+    unchanged = 0
     async with _connect() as db:
-        changed = 0
-        for post in WEEK2_POSTS:
+        for post in posts:
             existing = await db.fetchone(
                 f"SELECT id, status FROM scheduled_posts WHERE scheduled_at = {_ph(1)}",
                 (post["scheduled_at"],),
             )
-            if existing:
+            if existing and existing["status"] != "pending":
+                unchanged += 1
                 continue
+
+            if existing and _is_stale(post["scheduled_at"], now):
+                await db.execute(
+                    f"""
+                    UPDATE scheduled_posts
+                    SET status = 'expired', error_message = {_ph(1)}
+                    WHERE id = {_ph(2)} AND status = 'pending'
+                    """,
+                    (_STALE_REASON, existing["id"]),
+                )
+                expired += 1
+                logging.info(
+                    "Skipped stale scheduled post %s (scheduled_at=%s, channel=%s, %s); marked expired",
+                    existing["id"],
+                    post["scheduled_at"],
+                    CHANNEL_ID,
+                    label,
+                )
+                continue
+
+            if existing:
+                await db.execute(
+                    f"""
+                    UPDATE scheduled_posts
+                    SET text_content = {_ph(1)},
+                        poll_question = {_ph(2)},
+                        poll_options_json = {_ph(3)}
+                    WHERE id = {_ph(4)} AND status = 'pending'
+                    """,
+                    (
+                        post.get("text_content"),
+                        post.get("poll_question"),
+                        post.get("poll_options_json"),
+                        existing["id"],
+                    ),
+                )
+                updated += 1
+                continue
+
+            stale = _is_stale(post["scheduled_at"], now)
             await db.execute(
                 f"""
                 INSERT INTO scheduled_posts
                     (scheduled_at, post_type, text_content,
-                     poll_question, poll_options_json, channel_id)
-                VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)})
+                     poll_question, poll_options_json, channel_id,
+                     status, error_message)
+                VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)}, {_ph(7)}, {_ph(8)})
                 """,
                 (
                     post["scheduled_at"],
@@ -471,59 +584,36 @@ async def seed_week2_posts() -> int:
                     post.get("poll_question"),
                     post.get("poll_options_json"),
                     CHANNEL_ID,
+                    "expired" if stale else "pending",
+                    _STALE_REASON if stale else None,
                 ),
             )
-            changed += 1
+            if stale:
+                expired += 1
+                logging.info(
+                    "Skipped stale scheduled post scheduled_at=%s channel=%s (%s); "
+                    "stored as expired, not sent",
+                    post["scheduled_at"],
+                    CHANNEL_ID,
+                    label,
+                )
+            else:
+                inserted += 1
         await db.commit()
-    logging.info("Seeded/updated %d scheduled posts (Week 2)", changed)
-    return changed
+    logging.info(
+        "Seed %s: inserted %d, updated %d pending, expired %d stale, left %d unchanged",
+        label,
+        inserted,
+        updated,
+        expired,
+        unchanged,
+    )
+    return inserted + updated
+
+
+async def seed_week2_posts() -> int:
+    return await _seed_posts(WEEK2_POSTS, "Week 2")
 
 
 async def seed_week1_posts() -> int:
-    async with _connect() as db:
-        changed = 0
-        for post in WEEK1_POSTS:
-            existing = await db.fetchone(
-                f"SELECT id, status FROM scheduled_posts WHERE scheduled_at = {_ph(1)}",
-                (post["scheduled_at"],),
-            )
-
-            if existing:
-                if existing["status"] == "pending":
-                    await db.execute(
-                        f"""
-                        UPDATE scheduled_posts
-                        SET text_content = {_ph(1)}, poll_question = {_ph(2)}, poll_options_json = {_ph(3)}
-                        WHERE id = {_ph(4)}
-                        """,
-                        (
-                            post.get("text_content"),
-                            post.get("poll_question"),
-                            post.get("poll_options_json"),
-                            existing["id"],
-                        ),
-                    )
-                    changed += 1
-                continue
-
-            await db.execute(
-                f"""
-                INSERT INTO scheduled_posts
-                    (scheduled_at, post_type, text_content,
-                     poll_question, poll_options_json, channel_id)
-                VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)})
-                """,
-                (
-                    post["scheduled_at"],
-                    post["post_type"],
-                    post.get("text_content"),
-                    post.get("poll_question"),
-                    post.get("poll_options_json"),
-                    CHANNEL_ID,
-                ),
-            )
-            changed += 1
-
-        await db.commit()
-    logging.info("Seeded/updated %d scheduled posts (Week 1)", changed)
-    return changed
+    return await _seed_posts(WEEK1_POSTS, "Week 1")
