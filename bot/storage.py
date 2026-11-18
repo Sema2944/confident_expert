@@ -785,7 +785,7 @@ async def get_paywall_followup_users(hours_min: int = 24, hours_max: int = 48) -
         cutoff_new = cutoff_new.isoformat()
     async with _connect() as db:
         rows = await db.fetch(
-            f"""SELECT user_id FROM user_profiles
+            f"""SELECT user_id, paywall_hit_at FROM user_profiles
                WHERE paywall_hit_at BETWEEN {_ph(1)} AND {_ph(2)}
                AND subscription_status != 'active'
                AND paywall_hit_at IS NOT NULL""",
