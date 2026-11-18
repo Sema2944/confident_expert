@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -10,11 +11,15 @@ from bot.scheduler import (
     WEEK2_POSTS,
     _is_stale,
     _seed_posts,
+    _send_daily_stats_report,
+    _send_morning_outfits,
+    _send_paywall_followups,
     init_scheduled_posts_table,
     process_due_posts,
+    run_user_scheduler_hour,
     seed_week1_posts,
     seed_week2_posts,
-    start_channel_autopost,
+    start_schedulers,
 )
 from bot.storage import _connect, _ph
 from config.settings import Settings
@@ -184,28 +189,62 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             if post.get("poll_question"):
                 self.assertNotIn(post["poll_question"], _questions(bot))
 
-    async def test_channel_autopost_disabled_skips_seed_and_scheduler(self) -> None:
+    def test_posts_mention_wardrobe_bot(self) -> None:
+        blob = "\n".join(
+            (post.get("text_content") or "") + (post.get("poll_question") or "")
+            for post in WEEK1_POSTS + WEEK2_POSTS
+        )
+        self.assertNotIn("@shkaf_rabotaet_bot", blob)
+        self.assertIn("@wardrobe_24_bot", blob)
+
+    def test_scheduler_flag_defaults(self) -> None:
         self.assertFalse(Settings.model_fields["channel_autopost_enabled"].default)
+        self.assertTrue(Settings.model_fields["user_scheduler_enabled"].default)
 
+    async def test_channel_autopost_disabled_does_not_seed(self) -> None:
         bot = AsyncMock()
-        with patch("bot.scheduler.settings.channel_autopost_enabled", False):
-            task = await start_channel_autopost(bot)
-
-        self.assertIsNone(task)
+        with (
+            patch("bot.scheduler.settings.channel_autopost_enabled", False),
+            patch("bot.scheduler.settings.user_scheduler_enabled", True),
+            patch("bot.scheduler.channel_post_loop", new_callable=AsyncMock) as channel_loop,
+            patch("bot.scheduler.user_scheduler_loop", new_callable=AsyncMock) as user_loop,
+        ):
+            tasks = await start_schedulers(bot)
+        self.assertEqual(len(tasks), 1)
+        await tasks[0]
+        channel_loop.assert_not_called()
+        user_loop.assert_awaited_once()
         self.assertEqual(await self._all(), [])
         bot.send_message.assert_not_called()
         bot.send_poll.assert_not_called()
+
+    async def test_user_scheduler_disabled_leaves_channel_flag_independent(self) -> None:
+        bot = AsyncMock()
+        with (
+            patch("bot.scheduler.settings.channel_autopost_enabled", False),
+            patch("bot.scheduler.settings.user_scheduler_enabled", False),
+            patch("bot.scheduler.channel_post_loop", new_callable=AsyncMock) as channel_loop,
+            patch("bot.scheduler.user_scheduler_loop", new_callable=AsyncMock) as user_loop,
+        ):
+            tasks = await start_schedulers(bot)
+        self.assertEqual(tasks, [])
+        channel_loop.assert_not_called()
+        user_loop.assert_not_called()
+        self.assertEqual(await self._all(), [])
 
     async def test_channel_autopost_enabled_seeds_without_sending_stale(self) -> None:
         bot = AsyncMock()
         with (
             patch("bot.scheduler.settings.channel_autopost_enabled", True),
-            patch("bot.scheduler.scheduler_loop", new_callable=AsyncMock) as loop,
+            patch("bot.scheduler.settings.user_scheduler_enabled", False),
+            patch("bot.scheduler.channel_post_loop", new_callable=AsyncMock) as channel_loop,
+            patch("bot.scheduler.user_scheduler_loop", new_callable=AsyncMock) as user_loop,
         ):
-            task = await start_channel_autopost(bot)
-        self.assertIsNotNone(task)
-        await task
-        loop.assert_awaited_once()
+            tasks = await start_schedulers(bot)
+        self.assertEqual(len(tasks), 1)
+        await tasks[0]
+        channel_loop.assert_awaited_once()
+        user_loop.assert_not_called()
 
         now = datetime.now(timezone.utc)
         rows = await self._all()
@@ -215,6 +254,84 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(row["status"], "expired")
         bot.send_message.assert_not_called()
         bot.send_poll.assert_not_called()
+
+    async def test_user_jobs_are_not_sent_twice_after_restart(self) -> None:
+        outfit = unittest.mock.MagicMock()
+        outfit.items = []
+        bot = AsyncMock()
+        with (
+            patch("bot.storage.get_morning_push_users", AsyncMock(return_value=[{"user_id": 42}])),
+            patch("bot.storage.get_items", AsyncMock(return_value=[{"id": 1}, {"id": 2}, {"id": 3}])),
+            patch(
+                "services.weather_service.detect_season_for_user",
+                AsyncMock(return_value=("summer", "тепло")),
+            ),
+            patch("services.outfit_generation_service.OutfitService") as outfit_cls,
+            patch("services.outfit_service.OutfitImageService") as image_cls,
+        ):
+            outfit_cls.return_value.generate_outfits = AsyncMock(return_value=[outfit])
+            image_cls.return_value.render_outfit_image = AsyncMock(return_value=None)
+            await _send_morning_outfits(bot, current_hour=8)
+            await _send_morning_outfits(bot, current_hour=8)
+        self.assertEqual(bot.send_message.await_count, 1)
+
+        paywall_bot = AsyncMock()
+        hit = "2026-11-16T08:00:00+00:00"
+        with (
+            patch(
+                "bot.storage.get_paywall_followup_users",
+                AsyncMock(return_value=[{"user_id": 7, "paywall_hit_at": hit}]),
+            ),
+            patch("bot.storage.clear_paywall_hit", AsyncMock()) as clear_hit,
+        ):
+            await _send_paywall_followups(paywall_bot)
+            await _send_paywall_followups(paywall_bot)
+        self.assertEqual(paywall_bot.send_message.await_count, 1)
+        clear_hit.assert_awaited_once_with(7)
+
+        stats_bot = AsyncMock()
+        stats = {
+            "new_users": 0,
+            "total_users": 0,
+            "items_uploaded": 0,
+            "outfit_requests": 0,
+            "new_subscriptions": 0,
+            "errors_count": 0,
+        }
+        with (
+            patch("bot.scheduler.settings.admin_id", 99),
+            patch("bot.storage.get_stats_for_daily_report", AsyncMock(return_value=stats)),
+        ):
+            await _send_daily_stats_report(stats_bot)
+            await _send_daily_stats_report(stats_bot)
+        self.assertEqual(stats_bot.send_message.await_count, 1)
+        self.assertEqual(stats_bot.send_message.await_args.args[0], 99)
+
+    async def test_user_scheduler_hour_respects_flag_and_stats_hour(self) -> None:
+        bot = AsyncMock()
+        with (
+            patch("bot.scheduler.settings.user_scheduler_enabled", False),
+            patch("bot.scheduler._send_morning_outfits", AsyncMock()) as morning,
+            patch("bot.scheduler._send_paywall_followups", AsyncMock()) as paywall,
+            patch("bot.scheduler._send_daily_stats_report", AsyncMock()) as report,
+        ):
+            await run_user_scheduler_hour(bot, current_hour=21)
+        morning.assert_not_awaited()
+        paywall.assert_not_awaited()
+        report.assert_not_awaited()
+
+        with (
+            patch("bot.scheduler.settings.user_scheduler_enabled", True),
+            patch("bot.scheduler._send_morning_outfits", AsyncMock()) as morning,
+            patch("bot.scheduler._send_paywall_followups", AsyncMock()) as paywall,
+            patch("bot.scheduler._send_daily_stats_report", AsyncMock()) as report,
+        ):
+            await run_user_scheduler_hour(bot, current_hour=8)
+            report.assert_not_awaited()
+            morning.assert_awaited_once()
+            paywall.assert_awaited_once()
+            await run_user_scheduler_hour(bot, current_hour=21)
+            report.assert_awaited_once()
 
 
 if __name__ == "__main__":

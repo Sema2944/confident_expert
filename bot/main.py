@@ -11,13 +11,26 @@ from aiogram.types import Message
 
 from bot.routers import feedback, menu, outfits, payment, search, subscription, survey, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
+from bot.middlewares.update_log import IncomingUpdateLogMiddleware
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
 
 
+async def log_telegram_identity(bot: Bot) -> None:
+    """Пишет username из getMe. Токен и имя пользователя в лог не попадают."""
+    try:
+        me = await bot.get_me()
+    except Exception:
+        logging.exception("Telegram getMe failed")
+        return
+    username = f"@{me.username}" if me.username else None
+    logging.info("Telegram getMe: id=%s username=%s", me.id, username)
+
+
 def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(IncomingUpdateLogMiddleware())
     dispatcher.message.middleware(RateLimitMiddleware())
     dispatcher.include_router(menu.router)
     # Сначала глобальные кнопки меню / образов / оплаты — иначе wardrobe_view перехватывает любой текст
@@ -81,6 +94,7 @@ async def main() -> None:
         )
     await init_storage()
     bot = Bot(token=tg_token)
+    await log_telegram_identity(bot)
     dispatcher = build_dispatcher()
     _log_router_overview(dispatcher)
 

@@ -46,16 +46,20 @@ WARDROBE_STORAGE_PATH=./data/wardrobe.sqlite3
 ## Run (long polling)
 python -m bot.main
 
-## Channel autopost
+## Schedulers
 
-Posts to the Telegram channel run only when `CHANNEL_AUTOPOST_ENABLED=true`.
-The default is `false`: startup does not seed `scheduled_posts` and does not start
-`scheduler_loop`. That loop also sends morning outfits, paywall follow-ups, and the
-21:00 admin report, so those stay off while the flag is false.
-Leave the flag off unless storage survives restarts (PostgreSQL via `DB_URL`).
-The SQLite file (`WARDROBE_STORAGE_PATH`) is local and is lost on Render, which has
-no persistent disk. Posts that are already sent are never reset to pending. Unsent
-posts older than 30 minutes are stored as expired and are not published on startup.
+`CHANNEL_AUTOPOST_ENABLED` (default `false`) only seeds and publishes posts to the
+Telegram channel `@shkaf_rabotaet`. It does not control messages to users.
+Leave it off on Render: the SQLite file does not survive restarts. Posts that were
+already sent are not reset to pending. Unsent posts older than 30 minutes are
+stored as expired and are not published on startup.
+
+`USER_SCHEDULER_ENABLED` (default `true`) sends morning outfits, paywall follow-ups,
+and the 21:00 admin report. Each delivery is claimed in `user_scheduler_claims`
+before it is sent, so a restart does not send that same morning outfit, follow-up,
+or daily report again while the database is still there. On Render the SQLite file
+is wiped together with those claims and with the user rows, so a fresh process has
+nobody left to message.
 
 ## Notes
 - Replace the prompt files in `prompts/` with the approved production versions.

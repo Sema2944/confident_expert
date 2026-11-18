@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
@@ -148,17 +149,86 @@ async def send_scheduled_post(bot: Bot, post: dict) -> None:
 # ─── Background Loop ──────────────────────────────────────
 
 
+def _is_unique_violation(exc: BaseException) -> bool:
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    return type(exc).__name__ == "UniqueViolationError"
+
+
+def _claim_token(value: object) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).isoformat()
+        return value.isoformat()
+    return str(value)
+
+
+def _moscow_day() -> str:
+    return datetime.now(MOSCOW_TZ).date().isoformat()
+
+
+async def init_user_scheduler_claims() -> None:
+    async with _connect() as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_scheduler_claims (
+                claim_key TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.commit()
+
+
+async def try_claim(key: str) -> bool:
+    """True, если эта рассылка ещё не отмечалась. Повторный ключ не перезаписывается."""
+    await init_user_scheduler_claims()
+    now_utc = datetime.now(timezone.utc).isoformat()
+    try:
+        async with _connect() as db:
+            await db.execute(
+                f"""
+                INSERT INTO user_scheduler_claims (claim_key, created_at)
+                VALUES ({_ph(1)}, {_ph(2)})
+                """,
+                (key, now_utc),
+            )
+            await db.commit()
+        return True
+    except Exception as exc:
+        if _is_unique_violation(exc):
+            return False
+        raise
+
+
+async def release_claim(key: str) -> None:
+    async with _connect() as db:
+        await db.execute(
+            f"DELETE FROM user_scheduler_claims WHERE claim_key = {_ph(1)}",
+            (key,),
+        )
+        await db.commit()
+
+
 async def _send_paywall_followups(bot: Bot) -> None:
     """Follow-up тем, кто упёрся в paywall 24–48ч назад и не оплатил."""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    from config.settings import settings
-    from bot.storage import get_paywall_followup_users, clear_paywall_hit
+    from bot.storage import clear_paywall_hit, get_paywall_followup_users
 
     users = await get_paywall_followup_users(hours_min=24, hours_max=48)
     for row in users:
+        user_id = row["user_id"]
+        hit = row.get("paywall_hit_at")
+        if hit is None:
+            continue
+        claim_key = f"paywall:{user_id}:{_claim_token(hit)}"
+        if not await try_claim(claim_key):
+            logging.info("Skipped paywall follow-up for user %s; already claimed", user_id)
+            continue
+        sent_ok = False
         try:
             await bot.send_message(
-                row["user_id"],
+                user_id,
                 "👋 Привет! Вчера ты попробовал AI-стилиста — как впечатления?\n\n"
                 "Твой гардероб уже в боте. С подпиской я буду каждый день "
                 "подбирать образы по погоде, показывать на манекене и искать "
@@ -168,28 +238,35 @@ async def _send_paywall_followups(bot: Bot) -> None:
                     [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
                 ]),
             )
-            await clear_paywall_hit(row["user_id"])
+            sent_ok = True
+            await clear_paywall_hit(user_id)
         except Exception:
-            logging.exception("Paywall follow-up failed for user %s", row["user_id"])
+            if not sent_ok:
+                await release_claim(claim_key)
+            logging.exception("Paywall follow-up failed for user %s", user_id)
 
 
-async def _send_morning_outfits(bot: Bot) -> None:
-    """Утренние образы подписчикам."""
+async def _send_morning_outfits(bot: Bot, current_hour: int | None = None) -> None:
+    """Утренние образы подписчикам. Один раз на пользователя в календарный день МСК."""
     from aiogram.types import BufferedInputFile
-    from bot.storage import get_morning_push_users, get_items
-    from services.weather_service import detect_season_for_user
+    from bot.storage import get_items, get_morning_push_users
     from services.outfit_generation_service import OutfitService
     from services.outfit_service import OutfitImageService
+    from services.weather_service import detect_season_for_user
 
-    current_hour = datetime.now(MOSCOW_TZ).hour
+    if current_hour is None:
+        current_hour = datetime.now(MOSCOW_TZ).hour
     users = await get_morning_push_users(current_hour)
+    day = _moscow_day()
 
     outfit_svc = OutfitService()
     image_svc = OutfitImageService()
 
     for user_data in users:
+        user_id = user_data["user_id"]
+        claim_key = f"morning:{user_id}:{day}"
+        claimed = False
         try:
-            user_id = user_data["user_id"]
             items = await get_items(user_id)
             if len(items) < 3:
                 continue
@@ -201,8 +278,16 @@ async def _send_morning_outfits(bot: Bot) -> None:
             if not outfits:
                 continue
 
+            if not await try_claim(claim_key):
+                logging.info(
+                    "Skipped morning outfit for user %s; already claimed for %s",
+                    user_id,
+                    day,
+                )
+                continue
+            claimed = True
+
             caption = f"☀️ Доброе утро! {weather_msg}\n\nВот твой образ на сегодня:"
-            # Build S3 items mapping for authorized photo download
             s3_items: dict[str, tuple[int, int]] = {}
             for item in items:
                 iid = item.get("id")
@@ -226,13 +311,19 @@ async def _send_morning_outfits(bot: Bot) -> None:
             else:
                 await bot.send_message(user_id, caption)
         except Exception:
-            logging.exception("Morning push failed for user %s", user_data["user_id"])
+            if claimed:
+                await release_claim(claim_key)
+            logging.exception("Morning push failed for user %s", user_id)
 
 
 async def _send_daily_stats_report(bot: Bot) -> None:
-    """Ежедневный отчёт статистики для администратора."""
-    from config.settings import settings
+    """Ежедневный отчёт статистики для администратора. Один раз на календарный день МСК."""
     if not settings.admin_id:
+        return
+    day = _moscow_day()
+    claim_key = f"daily_stats:{day}"
+    if not await try_claim(claim_key):
+        logging.info("Skipped daily stats report; already claimed for %s", day)
         return
     try:
         from bot.storage import get_stats_for_daily_report
@@ -248,10 +339,23 @@ async def _send_daily_stats_report(bot: Bot) -> None:
         )
         await bot.send_message(settings.admin_id, text, parse_mode="HTML")
     except Exception:
+        await release_claim(claim_key)
         logging.exception("Failed to send daily stats report")
 
 
 _last_hourly_check: int = -1
+
+
+async def run_user_scheduler_hour(bot: Bot, current_hour: int | None = None) -> None:
+    """Один проход пользовательских рассылок. Повтор в тот же день гасится claim-таблицей."""
+    if not settings.user_scheduler_enabled:
+        return
+    if current_hour is None:
+        current_hour = datetime.now(MOSCOW_TZ).hour
+    await _send_morning_outfits(bot, current_hour)
+    await _send_paywall_followups(bot)
+    if current_hour == 21:
+        await _send_daily_stats_report(bot)
 
 
 async def process_due_posts(bot: Bot) -> int:
@@ -282,44 +386,59 @@ async def process_due_posts(bot: Bot) -> int:
     return sent
 
 
-async def scheduler_loop(bot: Bot) -> None:
-    logging.info("Scheduler loop started")
-    global _last_hourly_check
+async def channel_post_loop(bot: Bot) -> None:
+    logging.info("Channel post loop started")
     try:
         while True:
             try:
                 await process_due_posts(bot)
-
-                # Раз в час — morning push + follow-up + дневная статистика
-                current_hour = datetime.now(MOSCOW_TZ).hour
-                if current_hour != _last_hourly_check:
-                    _last_hourly_check = current_hour
-                    await _send_morning_outfits(bot)
-                    await _send_paywall_followups(bot)
-                    if current_hour == 21:
-                        await _send_daily_stats_report(bot)
-
             except Exception:
-                logging.exception("Scheduler loop iteration failed")
-
+                logging.exception("Channel post loop iteration failed")
             await asyncio.sleep(60)
     except asyncio.CancelledError:
-        logging.info("Scheduler loop stopped")
+        logging.info("Channel post loop stopped")
         raise
 
 
-async def start_channel_autopost(bot: Bot) -> asyncio.Task | None:
-    """Сеет расписание и запускает цикл. При выключенном флаге не делает ни того, ни другого."""
-    if not settings.channel_autopost_enabled:
+async def user_scheduler_loop(bot: Bot) -> None:
+    logging.info("User scheduler loop started")
+    global _last_hourly_check
+    try:
+        while True:
+            try:
+                current_hour = datetime.now(MOSCOW_TZ).hour
+                if current_hour != _last_hourly_check:
+                    _last_hourly_check = current_hour
+                    await run_user_scheduler_hour(bot, current_hour)
+            except Exception:
+                logging.exception("User scheduler iteration failed")
+            await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        logging.info("User scheduler loop stopped")
+        raise
+
+
+async def start_schedulers(bot: Bot) -> list[asyncio.Task]:
+    """Канал и пользовательские рассылки запускаются отдельными флагами."""
+    tasks: list[asyncio.Task] = []
+    if settings.channel_autopost_enabled:
+        await init_scheduled_posts_table()
+        await seed_week1_posts()
+        await seed_week2_posts()
+        tasks.append(asyncio.create_task(channel_post_loop(bot)))
+        logging.info("CHANNEL_AUTOPOST_ENABLED is true; channel scheduler started")
+    else:
+        logging.info("CHANNEL_AUTOPOST_ENABLED is false; not seeding channel posts")
+
+    if settings.user_scheduler_enabled:
+        await init_user_scheduler_claims()
+        tasks.append(asyncio.create_task(user_scheduler_loop(bot)))
+        logging.info("USER_SCHEDULER_ENABLED is true; user scheduler started")
+    else:
         logging.info(
-            "CHANNEL_AUTOPOST_ENABLED is false; not seeding channel posts and not starting scheduler"
+            "USER_SCHEDULER_ENABLED is false; morning outfits, paywall follow-up and admin report are off"
         )
-        return None
-    await init_scheduled_posts_table()
-    await seed_week1_posts()
-    await seed_week2_posts()
-    logging.info("Channel autopost enabled; starting scheduler loop")
-    return asyncio.create_task(scheduler_loop(bot))
+    return tasks
 
 
 # ─── Seed Data ─────────────────────────────────────────────
@@ -478,7 +597,7 @@ WEEK2_POSTS = [
             "30% — дополнительный (тёмно-синий, бордовый, хаки)\n"
             "10% — акцент (яркий шарф, сумка, обувь)\n\n"
             "Наш бот автоматически учитывает это правило при подборе образов. "
-            "Попробуй: @shkaf_rabotaet_bot"
+            "Попробуй: @wardrobe_24_bot"
         ),
     },
     {
@@ -492,7 +611,7 @@ WEEK2_POSTS = [
             "— 2 обуви (кроссовки, ботинки)\n"
             "— 1 верхняя (куртка/пальто)\n\n"
             "Загрузи свои вещи в бот — он покажет, "
-            "сколько образов можно собрать: @shkaf_rabotaet_bot"
+            "сколько образов можно собрать: @wardrobe_24_bot"
         ),
     },
     {
@@ -504,7 +623,7 @@ WEEK2_POSTS = [
             "и подбирает образ из ТВОИХ вещей.\n\n"
             "Не нужно думать — просто нажми «✨ Собрать образ» "
             "и получи готовый вариант за 5 секунд.\n\n"
-            "Попробуй: @shkaf_rabotaet_bot"
+            "Попробуй: @wardrobe_24_bot"
         ),
     },
 ]
