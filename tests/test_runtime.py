@@ -102,5 +102,22 @@ class SqliteCopyTests(unittest.TestCase):
         dest.close()
 
 
+class ComposeFileTests(unittest.TestCase):
+    def test_compose_is_v1_compatible_and_does_not_publish_postgres(self) -> None:
+        from pathlib import Path
+
+        text = Path("docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('version: "2.4"', text)
+        self.assertIn("mem_limit:", text)
+        self.assertNotIn("deploy:", text)
+        self.assertIn("container_name: shkaf-postgres", text)
+        self.assertIn("container_name: shkaf-bot", text)
+        self.assertIn("127.0.0.1:${HOST_PORT:-8095}:${PORT:-10000}", text)
+        self.assertNotIn("5432:5432", text)
+        self.assertNotIn("0.0.0.0:5432", text)
+        postgres = text.split("services:", 1)[1].split("bot:", 1)[0]
+        self.assertNotIn("ports:", postgres)
+
+
 if __name__ == "__main__":
     unittest.main()

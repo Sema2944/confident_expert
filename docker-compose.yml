@@ -1,9 +1,14 @@
-# Бот и Postgres на VPS. Секреты — в файле .env рядом с этим файлом, не в git.
-# Порт бота слушает только localhost: снаружи его открывает nginx.
+# Совместимо с docker-compose 1.29.2 (файл версии 2.4).
+# Имя проекта задаётся COMPOSE_PROJECT_NAME=shkaf в .env или флагом -p shkaf.
+# Postgres наружу не публикуется: только сеть этого compose.
+# Бот на хосте слушает только 127.0.0.1:${HOST_PORT:-8095}.
+
+version: "2.4"
 
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: shkaf-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-wardrobe}
@@ -20,14 +25,16 @@ services:
 
   bot:
     build: .
+    image: shkaf-bot:latest
+    container_name: shkaf-bot
     restart: unless-stopped
     env_file: .env
     environment:
       TG_MODE: polling
-      PORT: "10000"
+      PORT: "${PORT:-10000}"
       DB_URL: postgresql://${POSTGRES_USER:-wardrobe}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wardrobe}
     ports:
-      - "127.0.0.1:10000:10000"
+      - "127.0.0.1:${HOST_PORT:-8095}:${PORT:-10000}"
     depends_on:
       postgres:
         condition: service_healthy

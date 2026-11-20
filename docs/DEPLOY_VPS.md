@@ -1,78 +1,43 @@
 # Переезд бота с Render на свой сервер
 
-Бот — Telegram `@wardrobe_24_bot` и MAX. Сейчас он на Render. Этот файл — как запустить его на вашем VPS (Ubuntu, адрес `72.56.241.204`), не мешая проектам, которые там уже работают.
+Бот — Telegram `@wardrobe_24_bot` и MAX. Сейчас он работает на Render. Здесь — как поставить его на ваш VPS (Ubuntu 22.04, `72.56.241.204`), не трогая чужие сайты и чужие базы.
 
-Ничего само не выкладывается. Команды ниже запускаете вы, когда будете готовы.
+На сервере стоит старый `docker-compose` 1.29.2. Команды ниже с дефисом. Если позже появится плагин v2, те же команды пишутся через пробел: `docker compose`.
+
+Ничего само не выкладывается. Пока идёт фаза А, бот на Render продолжает отвечать людям.
 
 ## Что получится
 
-- База — Postgres в Docker, данные лежат в томе и не пропадают при перезапуске.
-- Telegram — long polling (`TG_MODE=polling`), отдельный адрес вебхука Telegram не нужен.
-- На сервере всё равно слушает порт `10000` (только с самого сервера): проверка живости `/` и оплата `POST /yookassa/webhook`. Снаружи его открывает nginx с HTTPS.
-- MAX, если задан `MAX_BOT_TOKEN`, стартует вместе с процессом, как раньше.
+- Свой Postgres в контейнере `shkaf-postgres`. Наружу порт базы не открывается. Чужие Postgres на портах 5433 и 5434 не используются.
+- Контейнер бота `shkaf-bot`. С хоста он доступен только как `127.0.0.1:8095`. Порт 10000 на сервере уже занят, его не трогаем.
+- Telegram на VPS — long polling. Отдельный вебхук Telegram не нужен.
+- nginx с HTTPS принимает `https://bot.shkaf-rabotaet.ru` и отдаёт его на `127.0.0.1:8095`. Оплата ЮKassa: `https://bot.shkaf-rabotaet.ru/yookassa/webhook`.
 
-Пока `TG_MODE` не задан, бот ведёт себя как на Render: режим `webhook`.
+Пока переменная `TG_MODE` не задана, бот как на Render: режим `webhook`.
 
-## 1. Что скопировать с Render заранее
+## Фаза А. Подготовка, Render ещё работает
 
-В панели Render откройте сервис бота и переменные окружения. Перепишите их себе в надёжное место (менеджер паролей), не в чат и не в git.
+### А1. Секреты с Render
 
-Нужны как минимум:
+В панели Render откройте переменные сервиса и перепишите их в менеджер паролей. Не в чат и не в git.
 
-- `BOT_TOKEN`
-- `MAX_BOT_TOKEN` (если MAX включён)
-- `AI_API_KEY`, `IMAGE_API_KEY` и остальные ключи, которые у вас заполнены
-- `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`
-- `YOOKASSA_RETURN_URL` (сейчас `https://t.me/wardrobe_24_bot`)
-- `ADMIN_ID`
-- `WEBHOOK_SECRET`, если он был
-- ключи S3 и Admitad, если пользовались
+Нужны как минимум: `BOT_TOKEN`, `MAX_BOT_TOKEN` (если MAX включён), `AI_API_KEY`, `IMAGE_API_KEY`, `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `YOOKASSA_RETURN_URL`, `ADMIN_ID`, `WEBHOOK_SECRET` если был, ключи S3 и Admitad если пользовались.
 
-Если на Render был `DB_URL` с Postgres — сделайте дамп этой базы (`pg_dump`) и сохраните файл. Тогда скрипт из SQLite не нужен: данные уже в Postgres, их можно залить в новый контейнер через `pg_restore` / `psql`.
+Запишите текущий URL уведомлений ЮKassa — он нужен для отката.
 
-Если `DB_URL` не было, бот хранил SQLite на диске Render. Этот диск стирается при перезапуске, живых данных там обычно нет. Скрипт переноса всё равно есть на случай, если файл `wardrobe.sqlite3` у вас сохранился.
+Если на Render был свой Postgres (`DB_URL`), сделайте `pg_dump` и сохраните файл. Скрипт из SQLite тогда не нужен. Если `DB_URL` не было, живых данных на диске Render обычно нет: диск стирается при перезапуске. Скрипт ниже — на случай, если файл `wardrobe.sqlite3` всё же сохранился.
 
-Запишите текущий адрес вебхука ЮKassa (старый URL на Render). Он понадобится, если придётся откатиться.
+### А2. DNS
 
-## 2. Подготовить сервер
-
-Зайдите на сервер как обычно. Docker и nginx, скорее всего, уже стоят. Проверьте:
-
-```bash
-docker --version
-docker compose version
-nginx -v
-```
-
-Если чего-то нет:
-
-```bash
-sudo apt update
-sudo apt install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx
-sudo systemctl enable --now docker nginx
-```
-
-Порт `10000` на localhost не должен быть занят другим проектом:
-
-```bash
-ss -ltnp | grep 10000 || echo "порт 10000 свободен"
-```
-
-Если занят — в `docker-compose.yml` замените левую часть `127.0.0.1:10000:10000` на свободный порт и тот же порт укажите в nginx ниже.
-
-## 3. DNS
-
-У регистратора домена создайте запись:
+У регистратора:
 
 - имя: `bot.shkaf-rabotaet.ru`
 - тип: `A`
 - значение: `72.56.241.204`
 
-Подождите, пока имя начнёт открываться на этот адрес (`dig +short bot.shkaf-rabotaet.ru`).
+Проверка: `dig +short bot.shkaf-rabotaet.ru` показывает этот адрес.
 
-## 4. Код и файл .env
-
-На сервере, в отдельной папке, не внутри чужих проектов:
+### А3. Каталог и .env
 
 ```bash
 sudo mkdir -p /opt/wardrobe-bot
@@ -84,134 +49,169 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Откройте `.env` и вставьте значения с Render. Секреты оставьте пустыми только там, где ключа у вас нет.
-
-Для этого сервера обязательно:
+В `.env` вставьте секреты с Render и эти строки:
 
 ```env
+COMPOSE_PROJECT_NAME=shkaf
 TG_MODE=polling
+HOST_PORT=8095
 PORT=10000
 POSTGRES_USER=wardrobe
 POSTGRES_PASSWORD=придумайте_длинный_пароль
 POSTGRES_DB=wardrobe
 ```
 
-`DB_URL` в `.env` можно не заполнять: `docker-compose.yml` сам подставляет адрес контейнера Postgres. Пароль в логах бота не печатается. В пароле Postgres не используйте символы `@`, `:`, `/` и `#` — они ломают адрес базы.
+`PORT=10000` — порт внутри контейнера. Снаружи nginx ходит на `HOST_PORT` (8095). `DB_URL` можно не писать: compose подставляет адрес `postgres` внутри своей сети. В пароле Postgres не используйте `@`, `:`, `/` и `#`.
 
-`REDIS_URL` оставьте пустым, если отдельного Redis нет. Состояния диалогов тогда живут в памяти процесса и сбрасываются при перезапуске контейнера. Это нормально для одного бота.
+`REDIS_URL` оставьте пустым. `YOOKASSA_IP_CHECK=true` можно оставить.
 
-`YOOKASSA_IP_CHECK=true` можно оставить. nginx передаёт адрес клиента в `X-Forwarded-For`.
+Файл `.env` не коммитьте.
 
-Не коммитьте `.env`.
+### А4. Сборка и только база
 
-## 5. Если есть файл SQLite
-
-Положите его на сервер, например в `/opt/wardrobe-bot/wardrobe.sqlite3`, и откройте чтение: `chmod a+r wardrobe.sqlite3`. Поднимите Postgres и один раз прогоните скрипт. Повторный запуск не затирает строки, которые уже есть в Postgres.
+Образ собирается, контейнер бота не стартует. Render в это время ещё работает.
 
 ```bash
 cd /opt/wardrobe-bot
-docker compose up -d postgres
-docker compose run --rm \
+docker-compose -p shkaf build
+docker-compose -p shkaf up -d postgres
+docker-compose -p shkaf ps
+```
+
+В списке должен быть `shkaf-postgres` и не должно быть запущенного `shkaf-bot`. Портов вида `0.0.0.0:5432` у этого контейнера нет.
+
+Если сохранился SQLite, положите его рядом и откройте чтение: `chmod a+r wardrobe.sqlite3`. Одноразовый контейнер только копирует данные и завершается, Telegram он не слушает:
+
+```bash
+docker-compose -p shkaf run --rm \
   -v "$PWD/wardrobe.sqlite3:/data/wardrobe.sqlite3:ro" \
   bot python scripts/sqlite_to_postgres.py /data/wardrobe.sqlite3
 ```
 
-В выводе будет `имя_таблицы: новых строк N`. Второй запуск покажет нули — так и должно быть.
+Повторный запуск пишет `новых строк 0`. Если живая база была Postgres на Render, залейте дамп в `shkaf-postgres`, а не этот скрипт.
 
-Если живая база была Postgres на Render, вместо этого скрипта залейте дамп в контейнер `postgres`.
+### А5. nginx, только этот домен
 
-## 6. Запуск
-
-Сначала остановите бота на Render, и только потом запускайте его здесь. Иначе Telegram будет отдавать сообщения обоим, и люди получат двойные ответы.
-
-1. В панели Render нажмите Suspend / Stop у сервиса бота. Убедитесь, что он не в статусе Live.
-2. На сервере:
+Чужие сайты не редактируем. Сначала копия всей конфигурации:
 
 ```bash
-cd /opt/wardrobe-bot
-docker compose up -d --build
-docker compose logs -f bot
+sudo tar -C / -czf "$HOME/nginx-backup-before-shkaf.tar.gz" etc/nginx
 ```
 
-В логах должны быть строки:
-
-- `Storage backend: PostgreSQL host=postgres port=5432 dbname=wardrobe user=wardrobe` — без пароля
-- `Telegram mode: polling`
-- `HTTP server started on 0.0.0.0:10000`
-- `Telegram getMe: id=... username=@wardrobe_24_bot`
-- `FSM storage: MemoryStorage` (или Redis, если задали `REDIS_URL`)
-
-Остановка просмотра логов: Ctrl+C, контейнеры при этом продолжают работать.
-
-Проверка с сервера:
+Новый файл и больше ничего. Сохраните как `/etc/nginx/sites-available/shkaf-bot`:
 
 ```bash
-curl -sS http://127.0.0.1:10000/
-```
-
-Ответ: `OK`.
-
-## 7. nginx и сертификат
-
-Файл `/etc/nginx/sites-available/wardrobe-bot`:
-
-```nginx
+sudo tee /etc/nginx/sites-available/shkaf-bot >/dev/null <<'EOF'
 server {
     listen 80;
     server_name bot.shkaf-rabotaet.ru;
 
     location / {
-        proxy_pass http://127.0.0.1:10000;
+        proxy_pass http://127.0.0.1:8095;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+EOF
+sudo ln -s /etc/nginx/sites-available/shkaf-bot /etc/nginx/sites-enabled/shkaf-bot
+sudo nginx -t
 ```
 
+Если `nginx -t` пишет ошибку, симлинк сразу уберите и не делайте reload:
+
 ```bash
-sudo ln -s /etc/nginx/sites-available/wardrobe-bot /etc/nginx/sites-enabled/wardrobe-bot
+sudo rm -f /etc/nginx/sites-enabled/shkaf-bot
 sudo nginx -t
+```
+
+Если проверка прошла:
+
+```bash
 sudo systemctl reload nginx
 sudo certbot --nginx -d bot.shkaf-rabotaet.ru
 ```
 
-Certbot сам допишет `listen 443 ssl` и сертификат Let's Encrypt. После этого с любой машины:
+Только этот домен. Не запускайте `certbot` без `-d`: он может задеть чужие сайты.
+
+Пока бот не запущен, `curl -sS https://bot.shkaf-rabotaet.ru/` может вернуть 502. Так и должно быть в фазе А. Сертификат при этом уже выдан.
+
+## Фаза Б. Переключение, несколько минут
+
+Два процесса сразу не держите: и Render, и VPS начнут отвечать на одни и те же сообщения.
+
+1. В Render нажмите Suspend у сервиса бота и дождитесь, что он не Live.
+2. На сервере:
 
 ```bash
+cd /opt/wardrobe-bot
+docker-compose -p shkaf up -d bot
+docker-compose -p shkaf logs -f bot
+```
+
+В логах:
+
+- `Storage backend: PostgreSQL host=postgres port=5432 dbname=wardrobe user=wardrobe` — без пароля
+- `Telegram mode: polling`
+- `HTTP server started on 0.0.0.0:10000` — это порт внутри контейнера
+- `Telegram getMe: id=... username=@wardrobe_24_bot`
+
+Ctrl+C только закрывает просмотр логов.
+
+3. Проверка:
+
+```bash
+curl -sS http://127.0.0.1:8095/
 curl -sS https://bot.shkaf-rabotaet.ru/
 ```
 
-снова `OK`.
+Оба ответа: `OK`. Напишите боту в Telegram. Ответ должен прийти один раз.
 
-Адрес для ЮKassa: `https://bot.shkaf-rabotaet.ru/yookassa/webhook`
+4. В кабинете ЮKassa смените URL уведомлений на `https://bot.shkaf-rabotaet.ru/yookassa/webhook`, событие `payment.succeeded`. Автоплатежи не включайте.
 
-## 8. ЮKassa
+Если в логах `YooKassa webhook rejected`, в `.env` поставьте `YOOKASSA_IP_CHECK=false` и выполните `docker-compose -p shkaf up -d bot`. Платёж всё равно сверяется с API ЮKassa.
 
-В кабинете ЮKassa смените URL уведомлений на `https://bot.shkaf-rabotaet.ru/yookassa/webhook`, событие `payment.succeeded`.
+## Фаза В. Откат
 
-Автоплатежи и сохранение карты не включайте: бот принимает только разовую оплату.
+1. Остановить только бота на VPS. Базу можно оставить, она наружу не торчит:
 
-Напишите боту в Telegram обычное сообщение и, если пользуетесь клубом, пройдите тестовый платёж на 1 ₽. В логах `docker compose logs bot` не должно быть `YooKassa webhook rejected`. Если вебхук отвечает 403 из‑за адреса прокси, в `.env` поставьте `YOOKASSA_IP_CHECK=false` и перезапустите: `docker compose up -d`. Платёж всё равно проверяется запросом в API ЮKassa, поддельное тело вебхука клуб не включит.
+```bash
+cd /opt/wardrobe-bot
+docker-compose -p shkaf stop bot
+```
 
-## 9. Откат на Render
+2. В ЮKassa верните прежний URL Render.
+3. В Render нажмите Resume. При старте бот снова поставит Telegram-вебхук.
+4. Напишите боту и убедитесь, что ответ один.
 
-1. `docker compose stop` в `/opt/wardrobe-bot` — VPS больше не забирает сообщения.
-2. В ЮKassa верните старый URL вебхука Render.
-3. В Render нажмите Resume. При старте бот снова поставит свой Telegram-вебхук (`TG_MODE` там по умолчанию `webhook`).
-4. Напишите боту и убедитесь, что отвечает один раз.
+Убрать сайт nginx, если он больше не нужен. Сначала проверка, потом reload:
 
-Не держите Render и VPS запущенными одновременно.
+```bash
+sudo rm -f /etc/nginx/sites-enabled/shkaf-bot
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot delete --cert-name bot.shkaf-rabotaet.ru
+```
 
-## Переменные, без которых бот на VPS не взлетит
+Если `nginx -t` после любых правок ругается, верните копию и не оставляйте сломанный nginx:
+
+```bash
+sudo tar -C / -xzf "$HOME/nginx-backup-before-shkaf.tar.gz"
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Чужие файлы в `sites-enabled` этим откатом сайта бота не удаляются. Полный tar нужен только если сломался весь nginx.
+
+## Переменные
 
 | Переменная | Зачем |
 | --- | --- |
 | `BOT_TOKEN` | Telegram |
 | `TG_MODE=polling` | long polling; compose ставит это сам |
-| `POSTGRES_PASSWORD` | пароль базы в compose |
-| `PORT=10000` | порт за nginx |
+| `COMPOSE_PROJECT_NAME=shkaf` | имя проекта compose, чтобы не смешаться с чужими контейнерами |
+| `HOST_PORT=8095` | порт на localhost сервера |
+| `PORT=10000` | порт процесса внутри контейнера |
+| `POSTGRES_PASSWORD` | пароль базы, только внутри сети compose |
 | `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` | оплата |
-| `AI_API_KEY` | разбор фото вещей |
+| `AI_API_KEY` | разбор фото |
 
-`DB_URL` и `DATABASE_URL` — адрес Postgres. Пустые оба означают SQLite, на сервере так делать не нужно. `REDIS_URL` необязателен.
+`REDIS_URL` не обязателен. Пустые `DB_URL` и `DATABASE_URL` в `.env` на VPS нормальны: адрес базы задаёт compose.
