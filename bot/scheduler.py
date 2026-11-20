@@ -212,8 +212,9 @@ async def release_claim(key: str) -> None:
 
 async def _send_paywall_followups(bot: Bot) -> None:
     """Follow-up тем, кто упёрся в paywall 24–48ч назад и не оплатил."""
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from bot.routers.payment import club_pay_keyboard
     from bot.storage import clear_paywall_hit, get_paywall_followup_users
+    from services.subscription_service import describe_offer
 
     users = await get_paywall_followup_users(hours_min=24, hours_max=48)
     for row in users:
@@ -227,16 +228,13 @@ async def _send_paywall_followups(bot: Bot) -> None:
             continue
         sent_ok = False
         try:
+            offer = await describe_offer(user_id)
             await bot.send_message(
                 user_id,
-                "👋 Привет! Вчера ты попробовал AI-стилиста — как впечатления?\n\n"
-                "Твой гардероб уже в боте. С подпиской я буду каждый день "
-                "подбирать образы по погоде, показывать на манекене и искать "
-                "похожие вещи в магазинах.\n\n"
-                f"💎 {settings.subscription_price} ₽/мес — попробуй!",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
-                ]),
+                "👋 Привет! Вчера ты упёрся в клуб.\n\n"
+                "Гардероб уже в боте — образы, манекен и поиск откроются после оплаты.\n\n"
+                f"{offer['paywall_text']}",
+                reply_markup=club_pay_keyboard(offer),
             )
             sent_ok = True
             await clear_paywall_hit(user_id)
@@ -576,7 +574,8 @@ WEEK1_POSTS = [
             "\n"
             "Не из каталога. Из твоего шкафа.\n"
             "\n"
-            "Первые 50 пользователей — бесплатный месяц.\n"
+            "Первые 50 участников клуба — 690 ₽ в месяц первые 3 месяца, затем 990 ₽.\n"
+            "Пробные 3 дня — 1 ₽. Продление вручную, автосписания нет.\n"
             "\n"
             "Всё о боте: sema2944.github.io/shkaf-rabotaet\n"
             "\n"

@@ -8,50 +8,64 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.storage import set_morning_push
 from config.settings import settings
-from services.payment_service import create_payment, is_yookassa_configured
-from services.subscription_service import get_or_create_user
+from services.payment_service import is_yookassa_configured, start_checkout
+from services.subscription_service import describe_offer, get_or_create_user
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 
-def _subscription_status_text(user: dict) -> str:
-    """Формирует текст о статусе подписки."""
-    if user.get("subscription_status") == "active":
-        until = user.get("subscription_until", "")
-        return f"✅ Подписка активна до {until[:10] if until else '—'}"
-    count = user.get("outfit_requests_count", 0)
-    remaining = max(0, 3 - count)
-    if remaining > 0:
-        return f"Пробный режим: осталось {remaining} бесплатных образов."
-    return "Пробный период закончился. Оформи подписку для безлимитного доступа."
+def club_pay_keyboard(offer: dict) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if offer["trial_available"]:
+        rows.append([InlineKeyboardButton(
+            text=f"{settings.trial_days} дня за {settings.trial_price_rub} ₽",
+            callback_data="pay:trial",
+        )])
+    quote = offer["quote"]
+    rows.append([InlineKeyboardButton(
+        text=f"Клуб — {quote.amount_rub} ₽",
+        callback_data="pay:subscribe",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def club_paywall(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    offer = await describe_offer(user_id)
+    return offer["paywall_text"], club_pay_keyboard(offer)
+
+
+async def _send_checkout(callback: CallbackQuery, kind: str) -> None:
+    if not callback.message:
+        return
+    if not is_yookassa_configured():
+        await callback.message.answer("Оплата скоро будет доступна.")
+        return
+    result = await start_checkout(callback.from_user.id, kind)
+    if not result:
+        await callback.message.answer("Не удалось создать платёж. Попробуйте позже.")
+        return
+    await callback.message.answer(
+        "Нажмите кнопку ниже для перехода к оплате.\n"
+        "Автосписания нет: это разовый платёж.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=result["confirmation_url"])]
+        ]),
+    )
+    logger.info("Payment created for user %s: %s", callback.from_user.id, result["payment_id"])
 
 
 @router.message(F.text.in_({"💎 Подписка", "💳 Подписка", "Подписка"}))
 async def subscription_info(message: Message) -> None:
-    user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    status_text = _subscription_status_text(user)
-
-    if user.get("subscription_status") == "active":
-        await message.answer(f"💎 Подписка\n\n{status_text}")
+    await get_or_create_user(message.from_user.id, message.from_user.username)
+    offer = await describe_offer(message.from_user.id)
+    if offer["active"]:
+        await message.answer(offer["screen_text"])
         return
-
     if not is_yookassa_configured():
-        await message.answer(
-            f"💎 Подписка\n\n{status_text}\n\n"
-            "Оплата скоро будет доступна."
-        )
+        await message.answer(f"{offer['screen_text']}\n\nОплата скоро будет доступна.")
         return
-
-    price = settings.subscription_price
-    await message.answer(
-        f"💎 Подписка\n\n{status_text}\n\n"
-        f"Стоимость: {price} ₽ / {settings.subscription_days} дней\n"
-        "Безлимитные образы, визуализация и все функции.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"💳 Оплатить {price} ₽", callback_data="pay:subscribe")]
-        ]),
-    )
+    await message.answer(offer["screen_text"], reply_markup=club_pay_keyboard(offer))
 
 
 @router.callback_query(F.data == "pay:subscribe")
@@ -60,25 +74,16 @@ async def pay_subscribe(callback: CallbackQuery) -> None:
         await callback.answer()
     except Exception:
         pass
-    if not callback.message:
-        return
+    await _send_checkout(callback, "monthly")
 
-    if not is_yookassa_configured():
-        await callback.message.answer("Оплата скоро будет доступна.")
-        return
 
-    result = create_payment(user_id=callback.from_user.id)
-    if not result:
-        await callback.message.answer("Не удалось создать платёж. Попробуйте позже.")
-        return
-
-    await callback.message.answer(
-        "Нажмите кнопку ниже для перехода к оплате:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Перейти к оплате", url=result["confirmation_url"])]
-        ]),
-    )
-    logger.info("Payment created for user %s: %s", callback.from_user.id, result["payment_id"])
+@router.callback_query(F.data == "pay:trial")
+async def pay_trial(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    await _send_checkout(callback, "trial")
 
 
 # ── Morning push handlers ────────────────────────────────────

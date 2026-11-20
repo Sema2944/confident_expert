@@ -130,6 +130,32 @@ async def _connect():
             yield _SqliteConnection(conn)
 
 
+@asynccontextmanager
+async def _transaction():
+    """Одна транзакция: на PostgreSQL через asyncpg, на SQLite — commit вызывает вызывающий код."""
+    if _USE_PG:
+        await _init_pg_pool()
+        async with _pg_pool.acquire() as conn:
+            transaction = conn.transaction()
+            await transaction.start()
+            try:
+                yield _PgConnection(conn)
+                await transaction.commit()
+            except Exception:
+                await transaction.rollback()
+                raise
+    else:
+        import aiosqlite
+        async with aiosqlite.connect(_STORAGE_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            db = _SqliteConnection(conn)
+            try:
+                yield db
+            except Exception:
+                await conn.rollback()
+                raise
+
+
 # ─── Table creation ──────────────────────────────────────────────
 
 _PG_SCHEMA = """
@@ -414,12 +440,133 @@ async def _migrate_display_names() -> None:
         logger.info("Migrated %d display_name(s) to Russian", len(updates))
 
 
+async def init_payment_schema() -> None:
+    """Платежи клуба и слоты первых 50 участников. Общая для SQLite и PostgreSQL."""
+    async with _connect() as db:
+        if _USE_PG:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS club_members (
+                    user_id BIGINT PRIMARY KEY,
+                    trial_paid INTEGER NOT NULL DEFAULT 0,
+                    club_paid INTEGER NOT NULL DEFAULT 0,
+                    intro_slot INTEGER,
+                    intro_months_used INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS payment_records (
+                    payment_id TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    amount_rub INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    days INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+        else:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS club_members (
+                    user_id INTEGER PRIMARY KEY,
+                    trial_paid INTEGER NOT NULL DEFAULT 0,
+                    club_paid INTEGER NOT NULL DEFAULT 0,
+                    intro_slot INTEGER,
+                    intro_months_used INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS payment_records (
+                    payment_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    amount_rub INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    days INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+        await db.commit()
+
+
 async def init_storage() -> None:
     if _USE_PG:
+        logger.info("Storage backend: PostgreSQL")
         await _init_pg()
     else:
+        logger.info("Storage backend: SQLite (%s)", _STORAGE_PATH)
         await _init_sqlite()
+    await init_payment_schema()
     await _migrate_display_names()
+
+
+def _empty_club_state(user_id: int) -> dict:
+    return {
+        "user_id": user_id,
+        "trial_paid": 0,
+        "club_paid": 0,
+        "intro_slot": None,
+        "intro_months_used": 0,
+    }
+
+
+async def get_club_state(user_id: int) -> dict:
+    async with _connect() as db:
+        row = await db.fetchone(
+            f"SELECT user_id, trial_paid, club_paid, intro_slot, intro_months_used "
+            f"FROM club_members WHERE user_id = {_ph(1)}",
+            (user_id,),
+        )
+    if not row:
+        return _empty_club_state(user_id)
+    return row
+
+
+async def count_intro_members() -> int:
+    async with _connect() as db:
+        value = await db.fetchval(
+            "SELECT COUNT(*) FROM club_members WHERE intro_slot IS NOT NULL"
+        )
+    return int(value or 0)
+
+
+async def save_payment_intent(
+    *,
+    payment_id: str,
+    user_id: int,
+    amount_rub: int,
+    kind: str,
+    days: int,
+) -> None:
+    created = datetime.now(timezone.utc).isoformat()
+    async with _connect() as db:
+        await db.execute(
+            f"""
+            INSERT INTO payment_records
+                (payment_id, user_id, amount_rub, kind, days, status, created_at)
+            VALUES ({_ph(1)}, {_ph(2)}, {_ph(3)}, {_ph(4)}, {_ph(5)}, {_ph(6)}, {_ph(7)})
+            """,
+            (payment_id, user_id, amount_rub, kind, days, "pending", created),
+        )
+        await db.commit()
+
+
+async def get_payment_record(payment_id: str) -> dict | None:
+    async with _connect() as db:
+        return await db.fetchone(
+            f"""
+            SELECT payment_id, user_id, amount_rub, kind, days, status
+            FROM payment_records WHERE payment_id = {_ph(1)}
+            """,
+            (payment_id,),
+        )
 
 
 # ─── Outfit Feedback ─────────────────────────────────────────────

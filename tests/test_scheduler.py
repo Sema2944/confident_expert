@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from bot import storage
+from bot.storage import init_storage
 from bot.scheduler import (
     WEEK1_POSTS,
     WEEK2_POSTS,
@@ -51,6 +52,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self._prev_path = storage._STORAGE_PATH
         storage._STORAGE_PATH = Path(self._tmpdir.name) / "wardrobe.sqlite3"
         self.assertFalse(storage._USE_PG)
+        await init_storage()
         await init_scheduled_posts_table()
 
     async def asyncTearDown(self) -> None:

@@ -11,10 +11,10 @@ from bot.keyboards import (
     menu_keyboard, occasion_keyboard, outfit_choice_keyboard,
     outfit_reaction_keyboard, season_keyboard,
 )
+from bot.routers.payment import club_paywall
 from bot.storage import get_items, get_user_capsules, log_outfit_feedback, record_paywall_hit, save_outfit_to_history
 from services.subscription_service import can_generate_outfit, get_or_create_user, increment_outfit_count
 from config.categories import normalize_category
-from config.settings import settings
 from bot.states import BotStates
 from services.image_service import ImageService
 from services.outfit_generation_service import OutfitResult, OutfitService
@@ -108,15 +108,8 @@ async def _generate_and_show_outfit(
     allowed, reason = await can_generate_outfit(message.from_user.id)
     if not allowed:
         await record_paywall_hit(message.from_user.id)
-        await message.answer(
-            reason,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
-                    callback_data="pay:subscribe",
-                )],
-            ]),
-        )
+        text, keyboard = await club_paywall(message.from_user.id)
+        await message.answer(text or reason, reply_markup=keyboard)
         await state.set_state(BotStates.menu)
         return
 
@@ -259,31 +252,7 @@ async def _generate_and_show_outfit(
 
         # Тизеры для free-пользователей
         user = await get_or_create_user(message.from_user.id)
-        is_premium = user.get("subscription_status") == "active"
         count = user.get("outfit_requests_count", 0) + 1  # +1 т.к. increment ещё не отразился в объекте
-        if not is_premium:
-            if count == 1:
-                await message.answer(
-                    "💎 Кстати, с подпиской я могу показать этот образ "
-                    "на манекене — в двух ракурсах, с реальными текстурами твоих вещей."
-                )
-            elif count == 2:
-                await message.answer(
-                    "💎 С подпиской ты также можешь искать похожие вещи "
-                    "в Lamoda, Wildberries и OZON прямо из карточки."
-                )
-            elif count == 3:
-                await message.answer(
-                    "⚠️ Это был последний бесплатный образ.\n\n"
-                    "Чтобы продолжить получать образы, визуализации на манекене "
-                    "и поиск похожих вещей — оформи подписку 💎",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
-                            callback_data="pay:subscribe",
-                        )],
-                    ]),
-                )
 
         # Опрос после каждого 3-го образа
         if count > 0 and count % 3 == 0:
@@ -586,13 +555,10 @@ async def visualize_outfit(callback: CallbackQuery, state: FSMContext) -> None:
         is_premium = user.get("subscription_status") == "active"
 
         if not is_premium:
+            text, keyboard = await club_paywall(callback.from_user.id)
             await callback.message.answer(
-                "✨ Визуализация на манекене — функция подписки.\n\n"
-                "Хочешь увидеть, как твой образ выглядит на манекене в 2 ракурсах?\n"
-                f"Оформи подписку — {settings.subscription_price} ₽/мес.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
-                ]),
+                "✨ Визуализация на манекене входит в клуб.\n\n" + text,
+                reply_markup=keyboard,
             )
             return
 
@@ -762,15 +728,8 @@ async def _generate_and_show_multi_outfits(
     allowed, reason = await can_generate_outfit(user_id)
     if not allowed:
         await record_paywall_hit(user_id)
-        await message.answer(
-            reason,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"💎 Подписка — {settings.subscription_price} ₽/мес",
-                    callback_data="pay:subscribe",
-                )],
-            ]),
-        )
+        text, keyboard = await club_paywall(user_id)
+        await message.answer(text or reason, reply_markup=keyboard)
         await state.set_state(BotStates.menu)
         return
 
