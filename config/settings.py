@@ -1,6 +1,8 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from bot.runtime import normalize_tg_mode, resolve_database_url
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
@@ -37,6 +39,12 @@ class Settings(BaseSettings):
     admitad_api_token: str | None = None
     replicate_api_token: str | None = None
     db_url: str | None = None
+    # Запасной адрес Postgres (как на Render/Heroku). Используется, если DB_URL пуст.
+    database_url: str | None = None
+    # Пусто — FSM в памяти процесса. Иначе redis://…
+    redis_url: str | None = None
+    # webhook — как на Render. polling — long polling на VPS, HTTP-сервер всё равно слушает порт.
+    tg_mode: str = "webhook"
     # Посты в канал. false: не сеять scheduled_posts и не запускать канал.
     channel_autopost_enabled: bool = False
     # Утренние образы, paywall follow-up и отчёт админу в 21:00. От канала не зависит.
@@ -47,6 +55,13 @@ class Settings(BaseSettings):
     s3_bucket: str = "shkaf-rabotaet"
     s3_endpoint: str = "https://storage.yandexcloud.net"
     max_bot_token: str | None = None
+
+    @model_validator(mode="after")
+    def normalize_runtime(self) -> "Settings":
+        resolved = resolve_database_url(self.db_url, self.database_url)
+        self.db_url = resolved or None
+        self.tg_mode = normalize_tg_mode(self.tg_mode)
+        return self
 
     @model_validator(mode="after")
     def require_at_least_one_bot_credential(self) -> "Settings":

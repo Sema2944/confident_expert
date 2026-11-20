@@ -7,18 +7,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+from bot.runtime import is_postgres_url, storage_backend_label
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 # ─── Backend detection ──────────────────────────────────────────
 _DB_URL = (settings.db_url or "").strip()
-_PG_SCHEMES = ("postgresql://", "postgres://")
-_USE_PG = _DB_URL.startswith(_PG_SCHEMES)
+_USE_PG = is_postgres_url(_DB_URL)
 
 if _DB_URL and not _USE_PG:
     logger.warning(
-        "DB_URL has unsupported scheme for asyncpg, fallback to SQLite. "
+        "DB_URL/DATABASE_URL has unsupported scheme for asyncpg, fallback to SQLite. "
         "Expected prefix: postgresql:// or postgres://"
     )
 
@@ -497,11 +497,10 @@ async def init_payment_schema() -> None:
 
 
 async def init_storage() -> None:
+    logger.info("Storage backend: %s", storage_backend_label(_DB_URL if _USE_PG else "", str(_STORAGE_PATH)))
     if _USE_PG:
-        logger.info("Storage backend: PostgreSQL")
         await _init_pg()
     else:
-        logger.info("Storage backend: SQLite (%s)", _STORAGE_PATH)
         await _init_sqlite()
     await init_payment_schema()
     await _migrate_display_names()

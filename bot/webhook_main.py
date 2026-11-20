@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.main import build_dispatcher, log_telegram_identity
+from bot.runtime import normalize_tg_mode
 from bot.scheduler import start_schedulers
 from bot.storage import init_storage
 from config.logging import setup_logging
@@ -134,18 +135,21 @@ async def main() -> None:
     webhook_path = os.getenv("WEBHOOK_PATH", "/tg/webhook")
     _sec = (os.getenv("WEBHOOK_SECRET") or "").strip()
     webhook_secret = _sec if _sec else None
+    tg_mode = normalize_tg_mode(settings.tg_mode)
+    logging.info("Telegram mode: %s", tg_mode)
 
-    # Регистрируем webhook handler
-    SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=webhook_secret,
-    ).register(app, path=webhook_path)
-
-    setup_application(app, dp, bot=bot)
-
-    # Ставим webhook
-    await on_startup(bot)
+    polling_task: asyncio.Task | None = None
+    if tg_mode == "webhook":
+        SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+            secret_token=webhook_secret,
+        ).register(app, path=webhook_path)
+        setup_application(app, dp, bot=bot)
+        await on_startup(bot)
+    else:
+        await bot.delete_webhook(drop_pending_updates=False)
+        logging.info("Telegram long polling: webhook удалён, апдейты пойдут через getUpdates")
 
     port = int(os.getenv("PORT", "10000"))
     runner = web.AppRunner(app)
@@ -156,18 +160,30 @@ async def main() -> None:
     site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
 
-    logging.info(f"Webhook server started on 0.0.0.0:{port}")
+    logging.info("HTTP server started on 0.0.0.0:%s (health and /yookassa/webhook)", port)
 
     scheduler_tasks = await start_schedulers(bot)
+    if tg_mode == "polling":
+        polling_task = asyncio.create_task(
+            dp.start_polling(bot, handle_signals=False, drop_pending_updates=False)
+        )
 
     # держим процесс живым
     try:
-        while True:
-            await asyncio.sleep(3600)
+        if polling_task is not None:
+            await polling_task
+        else:
+            while True:
+                await asyncio.sleep(3600)
     finally:
         for task in scheduler_tasks:
             task.cancel()
-        await on_shutdown(bot)
+        if polling_task is not None and not polling_task.done():
+            polling_task.cancel()
+        if tg_mode == "webhook":
+            await on_shutdown(bot)
+        elif bot.session:
+            await bot.session.close()
         await runner.cleanup()
 
 

@@ -43,8 +43,12 @@ IMAGE_MODEL=gpt-image-1
 6. (Optional) configure path for persistent local storage used by wardrobe and feedback:
 WARDROBE_STORAGE_PATH=./data/wardrobe.sqlite3
 
-## Run (long polling)
-python -m bot.main
+## Run
+
+На Render процесс запускается так: `python -m bot.webhook_main` (`TG_MODE=webhook`).
+На своём сервере тот же модуль с `TG_MODE=polling` и Postgres. Пошаговый переезд: [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md).
+
+Локально без вебхука: `python -m bot.main`
 
 ## Club
 
