@@ -21,7 +21,17 @@ class Settings(BaseSettings):
     yookassa_shop_id: str | None = None
     yookassa_secret_key: str | None = None
     yookassa_return_url: str = "https://t.me/wardrobe_24_bot"
-    subscription_price: int = 399
+    # Клуб. SUBSCRIPTION_PRICE больше не задаёт цену для пользователя.
+    club_price_rub: int = 990
+    club_period_days: int = 30
+    trial_price_rub: int = 1
+    trial_days: int = 3
+    intro_price_rub: int = 690
+    intro_member_limit: int = 50
+    intro_months: int = 3
+    # Отклонять вебхук, если IP отправителя не из списка ЮKassa.
+    yookassa_ip_check: bool = True
+    subscription_price: int = 990
     subscription_days: int = 30
     admitad_uid: str = ""
     admitad_api_token: str | None = None

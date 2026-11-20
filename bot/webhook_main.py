@@ -11,8 +11,7 @@ from bot.scheduler import start_schedulers
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
-from services.payment_service import init_yookassa, parse_webhook
-from services.subscription_service import activate_subscription
+from services.payment_service import client_ip_from_headers, handle_yookassa_notification, init_yookassa
 
 
 async def on_startup(bot: Bot) -> None:
@@ -81,39 +80,54 @@ async def main() -> None:
     async def yookassa_webhook(request: web.Request) -> web.Response:
         try:
             body = await request.json()
-            event_type, user_id = parse_webhook(body)
-            logging.info("YooKassa webhook: event=%s user_id=%s", event_type, user_id)
-            if event_type == "payment.succeeded" and user_id:
-                await activate_subscription(user_id, settings.subscription_days)
-                try:
-                    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-                    await bot.send_message(
-                        user_id,
-                        "✅ Подписка активирована!\n\n"
-                        "Хочешь получать готовый образ каждое утро? "
-                        "Я подберу по погоде и твоему расписанию.",
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="☀️ Да, присылай в 8:00", callback_data="push:enable:8")],
-                            [InlineKeyboardButton(text="🕐 В другое время", callback_data="push:select_time")],
-                            [InlineKeyboardButton(text="❌ Нет, спасибо", callback_data="push:disable")],
-                        ]),
-                    )
-                except Exception:
-                    logging.exception("Failed to send subscription confirmation to user %s", user_id)
-                try:
-                    from services.admin_notify_service import AdminNotifyService
-                    from bot.storage import increment_daily_stat
-                    await increment_daily_stat("new_subscriptions")
-                    await AdminNotifyService.notify(
-                        bot,
-                        f"💎 <b>Новая подписка</b>\nПользователь {user_id} оформил подписку на {settings.subscription_days} дней",
-                    )
-                except Exception:
-                    logging.exception("Failed to send admin payment notification")
-            return web.Response(text="OK", status=200)
+        except Exception:
+            logging.exception("YooKassa webhook is not JSON")
+            return web.Response(text="Bad Request", status=400)
+        source_ip = client_ip_from_headers(
+            request.headers.get("X-Forwarded-For"),
+            request.remote,
+        )
+        try:
+            result = await handle_yookassa_notification(body=body, source_ip=source_ip)
         except Exception:
             logging.exception("YooKassa webhook error")
             return web.Response(text="Error", status=500)
+        logging.info(
+            "YooKassa webhook result=%s user_id=%s",
+            result["reason"],
+            result["user_id"],
+        )
+        if result["activated"] and result["user_id"]:
+            user_id = result["user_id"]
+            try:
+                from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+                from services.pricing import renewal_notice
+                await bot.send_message(
+                    user_id,
+                    "✅ Клуб включён.\n\n"
+                    f"{renewal_notice()}\n\n"
+                    "Хочешь получать готовый образ каждое утро? "
+                    "Я подберу по погоде и твоему расписанию.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="☀️ Да, присылай в 8:00", callback_data="push:enable:8")],
+                        [InlineKeyboardButton(text="🕐 В другое время", callback_data="push:select_time")],
+                        [InlineKeyboardButton(text="❌ Нет, спасибо", callback_data="push:disable")],
+                    ]),
+                )
+            except Exception:
+                logging.exception("Failed to send subscription confirmation to user %s", user_id)
+            try:
+                from services.admin_notify_service import AdminNotifyService
+                from bot.storage import increment_daily_stat
+                await increment_daily_stat("new_subscriptions")
+                await AdminNotifyService.notify(
+                    bot,
+                    f"💎 <b>Новая оплата клуба</b>\nПользователь {user_id}, {result['days']} дн.",
+                )
+            except Exception:
+                logging.exception("Failed to send admin payment notification")
+        text = "OK" if result["status"] == 200 else result["reason"]
+        return web.Response(text=text, status=result["status"])
 
     app.router.add_post("/yookassa/webhook", yookassa_webhook)
 

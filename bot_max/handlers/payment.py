@@ -1,4 +1,8 @@
-"""MAX: подписка."""
+"""MAX: подписка клуба.
+
+create_payment в SDK ЮKassa синхронный. Здесь вызывается async start_checkout,
+который внутри зовёт create_payment без await.
+"""
 
 import logging
 
@@ -6,10 +10,10 @@ from maxapi import Router, F
 from maxapi.context import MemoryContext
 from maxapi.types import MessageCallback, LinkButton
 
-from bot.storage import _connect, _ph
 from bot_max.keyboards import _inline_kb, menu_keyboard
-from services.subscription_service import get_or_create_user
-from services.payment_service import create_payment
+from config.settings import settings
+from services.payment_service import is_yookassa_configured, start_checkout
+from services.subscription_service import describe_offer, get_or_create_user
 
 logger = logging.getLogger(__name__)
 
@@ -24,33 +28,51 @@ async def cb_subscribe(event: MessageCallback, context: MemoryContext):
     if not chat_id:
         return
 
-    user = await get_or_create_user(user_id)
-    if user.get("subscription_status") == "active":
+    await get_or_create_user(user_id)
+    offer = await describe_offer(user_id)
+    if offer["active"]:
         await event.bot.send_message(
             chat_id=chat_id,
-            text="✅ Подписка уже активна!",
+            text=offer["screen_text"],
             attachments=[menu_keyboard()],
         )
         return
 
-    # Создать платёж
-    result = await create_payment(user_id=user_id)
-    if result:
-        kb = _inline_kb([
-            [LinkButton(text="💳 Оплатить 399 ₽", url=result["confirmation_url"])],
-        ])
+    if not is_yookassa_configured():
         await event.bot.send_message(
             chat_id=chat_id,
-            text=(
-                "💎 Подписка «Шкаф Работает»\n\n"
-                "399 ₽/мес — безлимитные образы\n"
-                "После оплаты подписка активируется автоматически."
-            ),
-            attachments=[kb],
+            text=f"{offer['screen_text']}\n\nОплата скоро будет доступна.",
+            attachments=[menu_keyboard()],
         )
-    else:
+        return
+
+    links = []
+    if offer["trial_available"]:
+        trial = await start_checkout(user_id, "trial")
+        if trial:
+            links.append(LinkButton(
+                text=f"💳 {settings.trial_days} дня за {settings.trial_price_rub} ₽",
+                url=trial["confirmation_url"],
+            ))
+    monthly = await start_checkout(user_id, "monthly")
+    if monthly:
+        links.append(LinkButton(
+            text=f"💳 Клуб — {offer['quote'].amount_rub} ₽",
+            url=monthly["confirmation_url"],
+        ))
+        logger.info("MAX payment created for user %s: %s", user_id, monthly["payment_id"])
+
+    if not links:
         await event.bot.send_message(
             chat_id=chat_id,
             text="Не удалось создать платёж. Попробуй позже.",
             attachments=[menu_keyboard()],
         )
+        return
+
+    rows = [[button] for button in links]
+    await event.bot.send_message(
+        chat_id=chat_id,
+        text=f"{offer['screen_text']}\n\nПосле оплаты клуб включится автоматически.",
+        attachments=[_inline_kb(rows)],
+    )

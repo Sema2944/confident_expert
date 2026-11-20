@@ -2,7 +2,7 @@ import logging
 from io import BytesIO
 
 from aiogram import F, Router
-from aiogram.filters import Command, Filter
+from aiogram.filters import Command, Filter, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
@@ -389,6 +389,27 @@ async def _render_wardrobe_page(message: Message, user_id: int, category: str | 
     await message.answer("\n".join(lines), reply_markup=kb)
 
 
+@router.message(F.photo, StateFilter(None, BotStates.menu, BotStates.setting_city))
+async def photo_without_category(message: Message, state: FSMContext) -> None:
+    """Фото сразу после /start или из меню: сначала спрашиваем категорию."""
+    file_id = message.photo[-1].file_id
+    await state.update_data(pending_photo_file_id=file_id)
+    await state.set_state(BotStates.upload_category)
+    await message.answer(
+        "Фото получила. Выбери категорию этой вещи — и я добавлю её в гардероб.",
+        reply_markup=category_keyboard(),
+    )
+
+
+@router.message(BotStates.upload_category, F.photo)
+async def photo_while_choosing_category(message: Message, state: FSMContext) -> None:
+    await state.update_data(pending_photo_file_id=message.photo[-1].file_id)
+    await message.answer(
+        "Фото обновила. Теперь выбери категорию кнопкой ниже.",
+        reply_markup=category_keyboard(),
+    )
+
+
 @router.message(F.text == "📸 Загрузить гардероб")
 async def upload_start(message: Message, state: FSMContext) -> None:
     await state.set_state(BotStates.upload_category)
@@ -413,8 +434,13 @@ async def set_category(message: Message, state: FSMContext) -> None:
             reply_markup=category_keyboard(),
         )
         return
-    await state.update_data(category=category)
+    data = await state.get_data()
+    pending_photo = data.get("pending_photo_file_id")
+    await state.update_data(category=category, pending_photo_file_id=None)
     await state.set_state(BotStates.upload_photos)
+    if pending_photo:
+        await _process_wardrobe_photo(message, state, pending_photo)
+        return
 
     items = await get_items(message.from_user.id)
     if not items:
@@ -439,17 +465,21 @@ async def set_category(message: Message, state: FSMContext) -> None:
 
 @router.message(BotStates.upload_photos, F.photo)
 async def upload_photo(message: Message, state: FSMContext) -> None:
+    await _process_wardrobe_photo(message, state, message.photo[-1].file_id)
+
+
+async def _process_wardrobe_photo(message: Message, state: FSMContext, file_id: str) -> None:
     data = await state.get_data()
     category = data.get("category")
     if not category:
         await state.set_state(BotStates.upload_category)
+        await state.update_data(pending_photo_file_id=file_id)
         await message.answer(
             "Сначала выберите категорию вещи.",
             reply_markup=category_keyboard(),
         )
         return
 
-    file_id = message.photo[-1].file_id
     image_bytes = b""
 
     try:
@@ -1328,14 +1358,13 @@ async def cmd_style_advice(message: Message) -> None:
     is_premium = user.get("subscription_status") == "active"
 
     if not is_premium:
+        from bot.routers.payment import club_paywall
+        text, keyboard = await club_paywall(message.from_user.id)
         await message.answer(
-            "💡 Персональные советы стилиста — функция подписки.\n\n"
-            "Я проанализирую весь твой гардероб и дам 3 совета: "
-            "по цветам, стилю и сезонности.\n\n"
-            f"💎 Подписка — {settings.subscription_price} ₽/мес",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Оформить", callback_data="pay:subscribe")],
-            ]),
+            "💡 Персональные советы стилиста входят в клуб.\n\n"
+            "Я проанализирую гардероб и дам советы по цветам, стилю и сезону.\n\n"
+            + text,
+            reply_markup=keyboard,
         )
         return
 

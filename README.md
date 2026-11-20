@@ -46,6 +46,17 @@ WARDROBE_STORAGE_PATH=./data/wardrobe.sqlite3
 ## Run (long polling)
 python -m bot.main
 
+## Club
+
+Access is a paid club, not three free outfits. Defaults: 990 ₽ for 30 days,
+a 3-day trial for 1 ₽, and 690 ₽ per 30 days for the first 50 paying members
+for their first 3 months. Renewal is manual: the bot does not save a card and
+does not charge again by itself. Prices are `CLUB_PRICE_RUB`, `CLUB_PERIOD_DAYS`,
+`TRIAL_PRICE_RUB`, `TRIAL_DAYS`, `INTRO_PRICE_RUB`, `INTRO_MEMBER_LIMIT`, and
+`INTRO_MONTHS`. `YOOKASSA_IP_CHECK=true` rejects a payment webhook whose client
+IP is outside YooKassa's published ranges. Activation still re-fetches the
+payment from the YooKassa API and ignores a repeated `payment_id`.
+
 ## Schedulers
 
 `CHANNEL_AUTOPOST_ENABLED` (default `false`) only seeds and publishes posts to the

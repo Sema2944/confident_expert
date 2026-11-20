@@ -5,8 +5,8 @@ import logging
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.routers.payment import club_paywall
 from bot.storage import get_items
-from config.settings import settings
 from services.subscription_service import get_or_create_user
 from services.visual_search_service import build_search_results, describe_item_for_search
 
@@ -27,13 +27,10 @@ async def find_similar_item(callback: CallbackQuery) -> None:
     is_premium = user.get("subscription_status") == "active"
 
     if not is_premium:
+        text, keyboard = await club_paywall(callback.from_user.id)
         await callback.message.answer(
-            "🔍 Поиск похожих вещей — функция подписки.\n\n"
-            "Я найду похожие вещи в Lamoda, Wildberries и OZON с прямыми ссылками.\n"
-            f"Оформи подписку — {settings.subscription_price} ₽/мес.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Оформить подписку", callback_data="pay:subscribe")],
-            ]),
+            "🔍 Поиск похожих вещей входит в клуб.\n\n" + text,
+            reply_markup=keyboard,
         )
         return
 
