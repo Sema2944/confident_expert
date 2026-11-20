@@ -12,6 +12,7 @@ from aiogram.types import Message
 from bot.routers import feedback, menu, outfits, payment, search, subscription, survey, trends, voice, wardrobe
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.middlewares.update_log import IncomingUpdateLogMiddleware
+from bot.runtime import build_fsm_storage
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
@@ -28,8 +29,10 @@ async def log_telegram_identity(bot: Bot) -> None:
     logging.info("Telegram getMe: id=%s username=%s", me.id, username)
 
 
-def build_dispatcher() -> Dispatcher:
-    dispatcher = Dispatcher()
+def build_dispatcher(storage=None) -> Dispatcher:
+    if storage is None:
+        storage = build_fsm_storage(settings.redis_url)
+    dispatcher = Dispatcher(storage=storage)
     dispatcher.update.outer_middleware(IncomingUpdateLogMiddleware())
     dispatcher.message.middleware(RateLimitMiddleware())
     dispatcher.include_router(menu.router)
