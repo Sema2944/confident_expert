@@ -16,7 +16,13 @@ from services.payment_service import (
     reconcile_recent_pending_payments,
 )
 from services.subscription_service import get_or_create_user, subscription_is_active
-from services.weather_service import clear_weather_cache, get_current_temperature
+from services.weather_service import (
+    cache_key,
+    clear_weather_cache,
+    detect_season_for_user,
+    get_current_temperature,
+    maybe_refresh_active_cities,
+)
 
 
 def _remote(payment_id: str, status: str, user_id: int = 77, amount: str = "1.00") -> dict:
@@ -257,7 +263,10 @@ class OutfitAndWeatherTests(unittest.IsolatedAsyncioTestCase):
 
         clear_weather_cache()
         from services import weather_service
-        weather_service._weather_cache["55.76,37.62"] = (4.0, datetime.now() - timedelta(hours=2))
+        weather_service._weather_cache[cache_key(None, 55.7558, 37.6173)] = (
+            4.0,
+            datetime.now() - timedelta(minutes=40),
+        )
         with unittest.mock.patch("services.weather_service.httpx.AsyncClient", _Client):
             with self.assertLogs("services.weather_service", level="WARNING") as captured:
                 temp = await get_current_temperature(55.7558, 37.6173)
@@ -288,6 +297,119 @@ class OutfitAndWeatherTests(unittest.IsolatedAsyncioTestCase):
         with unittest.mock.patch("services.weather_service.httpx.AsyncClient", _Client):
             temp = await get_current_temperature(1.0, 2.0)
         self.assertIsNone(temp)
+
+    async def test_yesterday_reading_is_not_reused(self) -> None:
+        import httpx
+        from services import weather_service
+
+        class _Client:
+            def __init__(self, *args, **kwargs) -> None:
+                self.timeout = kwargs.get("timeout")
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, *args, **kwargs):
+                request = httpx.Request("GET", "https://api.open-meteo.com/v1/forecast")
+                response = httpx.Response(429, request=request)
+                raise httpx.HTTPStatusError("limited", request=request, response=response)
+
+        clear_weather_cache()
+        weather_service._weather_cache[cache_key("Москва", 55.75, 37.62)] = (
+            20.0,
+            datetime.now() - timedelta(days=1),
+        )
+        with unittest.mock.patch("services.weather_service.httpx.AsyncClient", _Client):
+            temp = await get_current_temperature(55.75, 37.62, city="Москва")
+        self.assertIsNone(temp)
+        self.assertLessEqual(weather_service.SOURCE_TIMEOUT * 2, 3)
+
+    async def test_wttr_is_used_when_open_meteo_fails(self) -> None:
+        class _Response:
+            def __init__(self, payload: dict) -> None:
+                self._payload = payload
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return self._payload
+
+        class _Client:
+            def __init__(self, *args, **kwargs) -> None:
+                self.timeout = kwargs.get("timeout")
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url, *args, **kwargs):
+                if "wttr.in" in str(url):
+                    return _Response({"current_condition": [{"temp_C": "7"}]})
+                raise RuntimeError("open-meteo down")
+
+        clear_weather_cache()
+        with unittest.mock.patch("services.weather_service.httpx.AsyncClient", _Client):
+            temp = await get_current_temperature(55.75, 37.62, city="Москва")
+        self.assertEqual(temp, 7.0)
+
+    async def test_fresh_cache_skips_network(self) -> None:
+        from services import weather_service
+
+        clear_weather_cache()
+        weather_service._weather_cache[cache_key("Казань", 55.8, 49.1)] = (1.5, datetime.now())
+
+        class _Client:
+            def __init__(self, *args, **kwargs) -> None:
+                raise AssertionError("network should not be called")
+
+        with unittest.mock.patch("services.weather_service.httpx.AsyncClient", _Client):
+            temp = await get_current_temperature(55.8, 49.1, city="Казань")
+        self.assertEqual(temp, 1.5)
+
+    async def test_no_weather_says_so_and_still_returns_a_season(self) -> None:
+        with unittest.mock.patch(
+            "bot.storage.get_user_location",
+            new=AsyncMock(return_value=("Москва", None, None)),
+        ), unittest.mock.patch(
+            "services.weather_service.get_current_temperature",
+            new=AsyncMock(return_value=None),
+        ):
+            season, message = await detect_season_for_user(5)
+        self.assertIn(season, {"winter", "demi", "summer"})
+        self.assertIn("Погоду уточнить не удалось", message)
+
+    async def test_background_refresh_fills_city_cache_every_half_hour(self) -> None:
+        from services import weather_service
+
+        clear_weather_cache()
+        places = [{"city": "Сочи", "lat": 43.6, "lon": 39.7}]
+        with unittest.mock.patch(
+            "bot.storage.list_weather_places",
+            new=AsyncMock(return_value=places),
+        ), unittest.mock.patch(
+            "services.weather_service.get_current_temperature",
+            new=AsyncMock(return_value=18.0),
+        ) as fetch:
+            self.assertTrue(await maybe_refresh_active_cities(datetime.now()))
+            fetch.assert_awaited()
+            self.assertFalse(await maybe_refresh_active_cities(datetime.now()))
+            self.assertEqual(fetch.await_count, 1)
+        weather_service._last_refresh_at = datetime.now() - timedelta(minutes=31)
+        with unittest.mock.patch(
+            "bot.storage.list_weather_places",
+            new=AsyncMock(return_value=places),
+        ), unittest.mock.patch(
+            "services.weather_service.get_current_temperature",
+            new=AsyncMock(return_value=19.0),
+        ) as fetch_again:
+            self.assertTrue(await maybe_refresh_active_cities(datetime.now()))
+        fetch_again.assert_awaited()
 
 
 if __name__ == "__main__":

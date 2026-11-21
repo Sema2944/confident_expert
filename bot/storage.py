@@ -954,6 +954,17 @@ async def clear_user_items(user_id: int) -> None:
 # ─── User Profiles / Location ───────────────────────────────────
 
 
+async def list_weather_places() -> list[dict]:
+    """Города пользователей для фонового обновления погоды."""
+    async with _connect() as db:
+        return await db.fetch(
+            """
+            SELECT city, lat, lon FROM user_profiles
+            WHERE city IS NOT NULL OR lat IS NOT NULL
+            """
+        )
+
+
 async def get_user_location(user_id: int) -> tuple[str, float | None, float | None]:
     async with _connect() as db:
         row = await db.fetchone(

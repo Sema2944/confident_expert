@@ -430,6 +430,8 @@ async def user_scheduler_loop(bot: Bot) -> None:
     try:
         while True:
             try:
+                from services.weather_service import maybe_refresh_active_cities
+                await maybe_refresh_active_cities()
                 current_hour = datetime.now(MOSCOW_TZ).hour
                 if current_hour != _last_hourly_check:
                     _last_hourly_check = current_hour
