@@ -8,7 +8,12 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.storage import set_morning_push
 from config.settings import settings
-from services.payment_service import is_yookassa_configured, start_checkout
+from services.payment_service import (
+    check_latest_user_payment,
+    is_yookassa_configured,
+    payment_check_text,
+    start_checkout,
+)
 from services.subscription_service import describe_offer, get_or_create_user
 
 router = Router()
@@ -47,9 +52,11 @@ async def _send_checkout(callback: CallbackQuery, kind: str) -> None:
         return
     await callback.message.answer(
         "Нажмите кнопку ниже для перехода к оплате.\n"
+        "После оплаты нажмите «Я оплатил» — доступ включится, даже если уведомление задержится.\n"
         "Автосписания нет: это разовый платёж.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Перейти к оплате", url=result["confirmation_url"])]
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=result["confirmation_url"])],
+            [InlineKeyboardButton(text="Я оплатил", callback_data="pay:check")],
         ]),
     )
     logger.info("Payment created for user %s: %s", callback.from_user.id, result["payment_id"])
@@ -84,6 +91,23 @@ async def pay_trial(callback: CallbackQuery) -> None:
     except Exception:
         pass
     await _send_checkout(callback, "trial")
+
+
+@router.callback_query(F.data == "pay:check")
+async def pay_check(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    if not callback.message or not callback.from_user:
+        return
+    result = await check_latest_user_payment(callback.from_user.id, source="button")
+    text = payment_check_text(result["outcome"], result.get("days"))
+    if result["outcome"] == "canceled":
+        offer = await describe_offer(callback.from_user.id)
+        await callback.message.answer(text, reply_markup=club_pay_keyboard(offer))
+        return
+    await callback.message.answer(text)
 
 
 # ── Morning push handlers ────────────────────────────────────

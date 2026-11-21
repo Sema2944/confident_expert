@@ -6,6 +6,7 @@ from aiogram.types import ErrorEvent
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
+from aiogram.fsm.state import default_state
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -13,6 +14,7 @@ from bot.routers import feedback, menu, outfits, payment, search, subscription, 
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.middlewares.update_log import IncomingUpdateLogMiddleware
 from bot.runtime import build_fsm_storage
+from bot.states import BotStates
 from bot.storage import init_storage
 from config.logging import setup_logging
 from config.settings import settings
@@ -54,9 +56,13 @@ def build_dispatcher(storage=None) -> Dispatcher:
     @fallback_router.message(F.text == "🏠 Меню", StateFilter("*"))
     async def go_to_menu(message: Message, state: FSMContext) -> None:
         from bot.keyboards import menu_keyboard
-        from bot.states import BotStates
         await state.set_state(BotStates.menu)
         await message.answer("Главное меню:", reply_markup=menu_keyboard())
+
+    @fallback_router.message(F.text, StateFilter(default_state, BotStates.menu))
+    async def idle_free_text(message: Message, state: FSMContext) -> None:
+        from bot.routers.outfits import handle_idle_text
+        await handle_idle_text(message, state)
 
     dispatcher.include_router(fallback_router)
 

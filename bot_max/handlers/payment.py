@@ -8,11 +8,16 @@ import logging
 
 from maxapi import Router, F
 from maxapi.context import MemoryContext
-from maxapi.types import MessageCallback, LinkButton
+from maxapi.types import CallbackButton, MessageCallback, LinkButton
 
 from bot_max.keyboards import _inline_kb, menu_keyboard
 from config.settings import settings
-from services.payment_service import is_yookassa_configured, start_checkout
+from services.payment_service import (
+    check_latest_user_payment,
+    is_yookassa_configured,
+    payment_check_text,
+    start_checkout,
+)
 from services.subscription_service import describe_offer, get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -71,8 +76,24 @@ async def cb_subscribe(event: MessageCallback, context: MemoryContext):
         return
 
     rows = [[button] for button in links]
+    rows.append([CallbackButton(text="Я оплатил", payload="action:paid")])
     await event.bot.send_message(
         chat_id=chat_id,
         text=f"{offer['screen_text']}\n\nПосле оплаты клуб включится автоматически.",
         attachments=[_inline_kb(rows)],
+    )
+
+
+@router.message_callback(F.callback.payload == "action:paid")
+async def cb_paid(event: MessageCallback, context: MemoryContext):
+    await event.answer()
+    user_id = event.callback.user.user_id
+    chat_id = event.message.recipient.chat_id if event.message else None
+    if not chat_id:
+        return
+    result = await check_latest_user_payment(user_id, source="max_button")
+    await event.bot.send_message(
+        chat_id=chat_id,
+        text=payment_check_text(result["outcome"], result.get("days")),
+        attachments=[menu_keyboard()],
     )
