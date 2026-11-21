@@ -281,6 +281,144 @@ async def handle_yookassa_notification(
     }
 
 
+def _remote_status(remote: dict) -> str:
+    return str(remote.get("status") or "").strip().lower()
+
+
+async def sync_payment_with_api(
+    intent: dict,
+    *,
+    source: str,
+    fetch_payment=fetch_yookassa_payment,
+) -> dict:
+    """Сверяет локальный pending с API и активирует той же функцией, что вебхук.
+
+    Повторный вызов и поздний вебхук не продлевают срок второй раз.
+    """
+    from bot.storage import mark_payment_canceled
+    from services.subscription_service import apply_payment_once
+
+    payment_id = str(intent["payment_id"])
+    user_id = int(intent["user_id"])
+    remote_status = ""
+    try:
+        remote = fetch_payment(payment_id)
+        remote_status = _remote_status(remote)
+    except Exception:
+        logger.exception("YooKassa check failed payment_id=%s user_id=%s", payment_id, user_id)
+        outcome = "error"
+        remote = {}
+    else:
+        if remote_status == "succeeded":
+            if intent.get("status") == "succeeded":
+                outcome = "already_active"
+            else:
+                mismatch = payment_matches_intent(intent, remote)
+                if mismatch:
+                    logger.warning(
+                        "YooKassa check mismatch payment_id=%s user_id=%s reason=%s",
+                        payment_id,
+                        user_id,
+                        mismatch,
+                    )
+                    outcome = "mismatch"
+                else:
+                    claimed = await apply_payment_once(payment_id)
+                    outcome = "activated" if claimed else "already_active"
+        elif remote_status == "canceled":
+            await mark_payment_canceled(payment_id)
+            outcome = "canceled"
+        else:
+            # pending и waiting_for_capture ещё не деньги на счёте.
+            outcome = "pending"
+
+    logger.info(
+        "YooKassa check source=%s user_id=%s payment_id=%s remote_status=%s outcome=%s",
+        source,
+        user_id,
+        payment_id,
+        remote_status or "-",
+        outcome,
+    )
+    days = int(intent["days"]) if outcome in {"activated", "already_active"} else None
+    return {
+        "outcome": outcome,
+        "payment_id": payment_id,
+        "user_id": user_id,
+        "days": days,
+    }
+
+
+async def check_latest_user_payment(
+    user_id: int,
+    *,
+    source: str,
+    fetch_payment=fetch_yookassa_payment,
+) -> dict:
+    """Кнопка «Я оплатил»: последний pending этого пользователя, без ограничения по возрасту."""
+    from bot.storage import get_latest_payment, get_latest_pending_payment
+
+    pending = await get_latest_pending_payment(user_id)
+    if pending:
+        return await sync_payment_with_api(pending, source=source, fetch_payment=fetch_payment)
+    latest = await get_latest_payment(user_id)
+    if latest and latest.get("status") == "succeeded":
+        logger.info(
+            "YooKassa check source=%s user_id=%s payment_id=%s remote_status=- outcome=already_active",
+            source,
+            user_id,
+            latest["payment_id"],
+        )
+        return {
+            "outcome": "already_active",
+            "payment_id": latest["payment_id"],
+            "user_id": user_id,
+            "days": int(latest["days"]),
+        }
+    logger.info(
+        "YooKassa check source=%s user_id=%s payment_id=- remote_status=- outcome=no_pending",
+        source,
+        user_id,
+    )
+    return {"outcome": "no_pending", "payment_id": None, "user_id": user_id, "days": None}
+
+
+async def reconcile_recent_pending_payments(
+    *,
+    source: str = "scheduler",
+    max_age_hours: int = 24,
+    fetch_payment=fetch_yookassa_payment,
+) -> list[dict]:
+    """Планировщик: pending не старше суток. Более старые остаются для кнопки."""
+    from bot.storage import list_recent_pending_payments
+
+    rows = await list_recent_pending_payments(max_age_hours)
+    results = []
+    for row in rows:
+        results.append(
+            await sync_payment_with_api(row, source=source, fetch_payment=fetch_payment)
+        )
+    return results
+
+
+def payment_check_text(outcome: str, days: int | None = None) -> str:
+    if outcome == "activated":
+        period = f" на {days} дн." if days else ""
+        return (
+            f"✅ Оплата получена. Доступ включён{period}.\n\n"
+            "Автосписания нет: следующий период оплачивается вручную."
+        )
+    if outcome == "already_active":
+        return "Оплата уже учтена, доступ включён. Повторно срок не продлевается."
+    if outcome == "pending":
+        return "Оплата ещё обрабатывается. Нажмите «Я оплатил» через минуту."
+    if outcome == "canceled":
+        return "Этот платёж отменён. Можно оплатить снова."
+    if outcome == "no_pending":
+        return "Не вижу незавершённой оплаты. Если только что платили, подождите минуту и нажмите ещё раз."
+    return "Не удалось проверить оплату. Нажмите «Я оплатил» через минуту."
+
+
 def parse_webhook(body: dict) -> tuple[str, int | None]:
     """Старый разбор тела. Для активации не используется."""
     try:

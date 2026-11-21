@@ -557,15 +557,75 @@ async def save_payment_intent(
         await db.commit()
 
 
+_PAYMENT_COLUMNS = (
+    "payment_id, user_id, amount_rub, kind, days, status, created_at"
+)
+
+
 async def get_payment_record(payment_id: str) -> dict | None:
     async with _connect() as db:
         return await db.fetchone(
             f"""
-            SELECT payment_id, user_id, amount_rub, kind, days, status
+            SELECT {_PAYMENT_COLUMNS}
             FROM payment_records WHERE payment_id = {_ph(1)}
             """,
             (payment_id,),
         )
+
+
+async def get_latest_payment(user_id: int) -> dict | None:
+    async with _connect() as db:
+        return await db.fetchone(
+            f"""
+            SELECT {_PAYMENT_COLUMNS}
+            FROM payment_records
+            WHERE user_id = {_ph(1)}
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+
+async def get_latest_pending_payment(user_id: int) -> dict | None:
+    """Последний незакрытый платёж, в том числе созданный раньше сегодня."""
+    async with _connect() as db:
+        return await db.fetchone(
+            f"""
+            SELECT {_PAYMENT_COLUMNS}
+            FROM payment_records
+            WHERE user_id = {_ph(1)} AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+
+async def list_recent_pending_payments(max_age_hours: int = 24) -> list[dict]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    async with _connect() as db:
+        return await db.fetch(
+            f"""
+            SELECT {_PAYMENT_COLUMNS}
+            FROM payment_records
+            WHERE status = 'pending' AND created_at >= {_ph(1)}
+            ORDER BY created_at ASC
+            """,
+            (cutoff,),
+        )
+
+
+async def mark_payment_canceled(payment_id: str) -> None:
+    async with _connect() as db:
+        await db.execute(
+            f"""
+            UPDATE payment_records SET status = 'canceled'
+            WHERE payment_id = {_ph(1)} AND status = 'pending'
+            """,
+            (payment_id,),
+        )
+        await db.commit()
 
 
 # ─── Outfit Feedback ─────────────────────────────────────────────

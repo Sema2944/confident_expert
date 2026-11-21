@@ -1,6 +1,5 @@
 """Определение сезона по реальной погоде через Open-Meteo (бесплатно, без ключа)."""
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -11,7 +10,6 @@ logger = logging.getLogger(__name__)
 # Кэш: {cache_key: (temperature, timestamp)}
 _weather_cache: dict[str, tuple[float, datetime]] = {}
 _CACHE_TTL = timedelta(minutes=30)
-_MAX_RETRIES = 3
 
 # Координаты основных городов (fallback если пользователь не указал город)
 CITY_COORDS: dict[str, tuple[float, float]] = {
@@ -29,43 +27,46 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
 DEFAULT_COORDS = (55.7558, 37.6173)  # Москва
 
 
+def clear_weather_cache() -> None:
+    _weather_cache.clear()
+
+
 async def get_current_temperature(lat: float, lon: float) -> float | None:
-    """Получить текущую температуру через Open-Meteo (бесплатно, без ключа)."""
+    """Температура Open-Meteo. Свежий кэш 30 минут, при ошибке — прошлое значение."""
     cache_key = f"{lat:.2f},{lon:.2f}"
     now = datetime.now()
+    cached = _weather_cache.get(cache_key)
 
-    if cache_key in _weather_cache:
-        temp, cached_at = _weather_cache[cache_key]
-        if now - cached_at < _CACHE_TTL:
+    if cached and now - cached[1] < _CACHE_TTL:
+        return cached[0]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current_weather": "true",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            temp = float(data["current_weather"]["temperature"])
+            _weather_cache[cache_key] = (temp, now)
             return temp
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        if code == 429:
+            logger.warning("Open-Meteo rate limited (429) for %s", cache_key)
+        else:
+            logger.warning("Open-Meteo HTTP %s for %s", code, cache_key)
+    except Exception as exc:
+        logger.warning("Open-Meteo unavailable for %s: %s", cache_key, type(exc).__name__)
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://api.open-meteo.com/v1/forecast",
-                    params={
-                        "latitude": lat,
-                        "longitude": lon,
-                        "current_weather": "true",
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                temp = data["current_weather"]["temperature"]
-                _weather_cache[cache_key] = (temp, now)
-                return temp
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
-                wait = 2 ** attempt
-                logger.warning("Open-Meteo rate limited (429), retrying in %d sec (attempt %d/%d)", wait, attempt + 1, _MAX_RETRIES)
-                await asyncio.sleep(wait)
-                continue
-            logger.exception("Failed to get weather from Open-Meteo")
-            return None
-        except Exception:
-            logger.exception("Failed to get weather from Open-Meteo")
-            return None
+    if cached:
+        logger.info("Open-Meteo using last known temperature for %s", cache_key)
+        return cached[0]
     return None
 
 
@@ -97,30 +98,33 @@ def _fallback_season() -> str:
         return "summer"
 
 
+def _season_without_temperature() -> tuple[str, str]:
+    season = _fallback_season()
+    fallback_msg = {
+        "winter": "❄️ Подбираю зимний образ",
+        "demi": "🍂 Подбираю демисезонный образ",
+        "summer": "☀️ Подбираю лёгкий образ",
+    }
+    return season, fallback_msg[season]
+
+
 async def detect_season_for_user(user_id: int) -> tuple[str, str]:
-    """Определить сезон для пользователя.
+    """Сезон по погоде. Ошибка погоды не мешает подбору: календарь или прошлый замер."""
+    try:
+        from bot.storage import get_user_location
 
-    Приоритет: координаты (геолокация) → город из справочника → Москва.
-    Возвращает (season_code, weather_message).
-    """
-    from bot.storage import get_user_location
-
-    city, lat, lon = await get_user_location(user_id)
-
-    if lat and lon:
-        temp = await get_current_temperature(lat, lon)
-    else:
-        coords = CITY_COORDS.get((city or "").strip().lower(), DEFAULT_COORDS)
-        temp = await get_current_temperature(*coords)
+        city, lat, lon = await get_user_location(user_id)
+        if lat and lon:
+            temp = await get_current_temperature(lat, lon)
+        else:
+            coords = CITY_COORDS.get((city or "").strip().lower(), DEFAULT_COORDS)
+            temp = await get_current_temperature(*coords)
+    except Exception as exc:
+        logger.warning("Season detection failed for user %s: %s", user_id, type(exc).__name__)
+        return _season_without_temperature()
 
     if temp is None:
-        season = _fallback_season()
-        fallback_msg = {
-            "winter": "❄️ Подбираю зимний образ",
-            "demi": "🍂 Подбираю демисезонный образ",
-            "summer": "☀️ Подбираю лёгкий образ",
-        }
-        return season, fallback_msg[season]
+        return _season_without_temperature()
 
     season = temperature_to_season(temp)
     message = SEASON_WEATHER_TEXT[season].format(temp=round(temp))

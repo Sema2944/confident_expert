@@ -344,12 +344,38 @@ async def _send_daily_stats_report(bot: Bot) -> None:
 _last_hourly_check: int = -1
 
 
+async def _reconcile_pending_payments(bot: Bot) -> None:
+    """Подхватывает pending за последние сутки, если вебхук ЮKassa не дошёл."""
+    from services.payment_service import payment_check_text, reconcile_recent_pending_payments
+
+    try:
+        results = await reconcile_recent_pending_payments()
+    except Exception:
+        logging.exception("Pending payment reconcile failed")
+        return
+    for item in results:
+        if item.get("outcome") != "activated":
+            continue
+        try:
+            await bot.send_message(
+                item["user_id"],
+                payment_check_text("activated", item.get("days")),
+            )
+        except Exception:
+            logging.exception(
+                "Failed to notify user %s about confirmed payment %s",
+                item.get("user_id"),
+                item.get("payment_id"),
+            )
+
+
 async def run_user_scheduler_hour(bot: Bot, current_hour: int | None = None) -> None:
     """Один проход пользовательских рассылок. Повтор в тот же день гасится claim-таблицей."""
     if not settings.user_scheduler_enabled:
         return
     if current_hour is None:
         current_hour = datetime.now(MOSCOW_TZ).hour
+    await _reconcile_pending_payments(bot)
     await _send_morning_outfits(bot, current_hour)
     await _send_paywall_followups(bot)
     if current_hour == 21:

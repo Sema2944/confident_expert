@@ -113,6 +113,8 @@ async def _generate_and_show_outfit(
         await state.set_state(BotStates.menu)
         return
 
+    await message.answer("Подбираю образ…")
+
     all_items = await get_items(message.from_user.id)
     if not all_items:
         await message.answer(
@@ -649,19 +651,7 @@ SEASONS = {
 }
 
 
-@router.message(BotStates.request_occasion, F.text)
-async def set_occasion(message: Message, state: FSMContext) -> None:
-    if message.text == "🏠 Меню":
-        await state.set_state(BotStates.menu)
-        await message.answer("Главное меню:", reply_markup=menu_keyboard())
-        return
-
-    occasion = OCCASIONS.get(message.text)
-    if not occasion:
-        await message.answer("Не понял повод. Выберите кнопку.")
-        return
-
-    # Check if user has capsules — offer selection
+async def start_occasion(message: Message, state: FSMContext, occasion: str) -> None:
     capsules = await get_user_capsules(message.from_user.id)
     if capsules:
         from bot.keyboards import capsule_select_keyboard
@@ -674,6 +664,46 @@ async def set_occasion(message: Message, state: FSMContext) -> None:
 
     # Show base item selection
     await _show_base_selection(message, state, occasion)
+
+
+@router.message(BotStates.request_occasion, F.text)
+async def set_occasion(message: Message, state: FSMContext) -> None:
+    if message.text == "🏠 Меню":
+        await state.set_state(BotStates.menu)
+        await message.answer("Главное меню:", reply_markup=menu_keyboard())
+        return
+
+    from bot.free_text import interpret_free_text
+
+    occasion = OCCASIONS.get(message.text or "")
+    if not occasion:
+        guessed = interpret_free_text(message.text or "")
+        if guessed and guessed != "outfit":
+            occasion = guessed
+    if not occasion:
+        await message.answer(
+            "Не понял повод. Выбери кнопку или напиши: работа, свидание, прогулка.",
+            reply_markup=occasion_keyboard(),
+        )
+        return
+    await start_occasion(message, state, occasion)
+
+
+async def handle_idle_text(message: Message, state: FSMContext) -> None:
+    """Текст в меню или без состояния. Анкеты сюда не попадают."""
+    from bot.free_text import interpret_free_text
+
+    intent = interpret_free_text(message.text or "")
+    if intent == "outfit":
+        await request_outfit(message, state)
+        return
+    if intent:
+        await start_occasion(message, state, intent)
+        return
+    await message.answer(
+        "Я рядом. Нажми «✨ Собрать образ» или напиши, куда идёшь: работа, свидание, прогулка.",
+        reply_markup=menu_keyboard(),
+    )
 
 
 async def _show_base_selection(message: Message, state: FSMContext, occasion: str, *, user_id: int = 0) -> None:
@@ -732,6 +762,8 @@ async def _generate_and_show_multi_outfits(
         await message.answer(text or reason, reply_markup=keyboard)
         await state.set_state(BotStates.menu)
         return
+
+    await message.answer("Подбираю 3 образа…")
 
     outfits = await outfit_service.generate_outfits_around_base(
         items=items,
@@ -847,8 +879,6 @@ async def base_item_selected(callback: CallbackQuery, state: FSMContext) -> None
         await callback.message.answer("Вещь не найдена.", reply_markup=menu_keyboard())
         return
 
-    await callback.message.answer("Подбираю 3 образа…")
-
     from datetime import date
     from services.weather_service import detect_season_for_user
     season, weather_msg = await detect_season_for_user(user_id)
@@ -921,7 +951,6 @@ async def base_auto_selected(callback: CallbackQuery, state: FSMContext) -> None
         await callback.message.answer("Не удалось выбрать базовую вещь.", reply_markup=menu_keyboard())
         return
 
-    await callback.message.answer("Подбираю 3 образа…")
     await _generate_and_show_multi_outfits(
         message=callback.message,
         state=state,
@@ -1100,7 +1129,6 @@ async def set_season(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     occasion = data.get("occasion", "casual")
 
-    await message.answer("Подбираю образ…")
     await _generate_and_show_outfit(
         message=message,
         state=state,
